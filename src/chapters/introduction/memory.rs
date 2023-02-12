@@ -43,7 +43,7 @@ pub fn alloc_then_print_and_sleep() {
         let layout = alloc::Layout::from_size_align(size, alignment).unwrap();
 
         // `alloc` return raw pointer `*mut u8`
-        let ptr = alloc::alloc(layout);
+        let ptr = alloc::alloc_zeroed(layout);
         if ptr.is_null() {
             alloc::handle_alloc_error(layout);
         }
@@ -74,5 +74,6 @@ pub fn alloc_then_print_and_sleep() {
             thread::sleep(time::Duration::from_secs(1));
             cnt += 1;
         }
+        alloc::dealloc(ptr as *mut u8, layout);
     }
 }
