@@ -50,7 +50,7 @@ pub fn alloc_then_print_and_sleep() {
         // Cast pointer to a typed pointer
         // `u64` 값을 저장하고 싶다면, 해당 타입에 맞게 캐스팅한다
         let ptr = ptr as *mut u64;
-        *ptr = 0; // `*mut i32`가 가리키는 공간을 dereference
+        *ptr = 0; // `*mut u64`가 가리키는 공간을 dereference
 
         let mut cnt = 0;
         loop {
