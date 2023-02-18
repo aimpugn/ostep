@@ -7,17 +7,17 @@
         - [가상화(virtualization)](#가상화virtualization)
             - [virtualizing the CPU](#virtualizing-the-cpu)
             - [virtualizing the Memory](#virtualizing-the-memory)
-        - [동시성(concurrency)](#동시성concurrency)
+            - [동시성(concurrency)](#동시성concurrency)
+
+[OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
 ## introduction
 
 ### 가상화(virtualization)
 
-how does the operating system virtualize resources?
+OS transform physical into virtual, how does the operating system virtualize resources?
 
-OS transform physical into virtual
-
-따라서 OS를 아래와 같이 부르기도 한다.
+OS를 아래와 같이 부르기도 한다.
 1. as virtual machine
 2. as resource(CPU, memory, disk) manager
 
@@ -40,6 +40,16 @@ a single CPU as the seemingly infinite number of CPU.
 
 프로그램은 데이터를 메모리에 저장하고, load, stores 등의 명령어 통해 메모리에 접근하며, 각 프로그램의 명령(instruction)로 메모리에 있다. 따라서 메모리는 각 명령(instruction)을 가져올 때도 접근하게 된다
 
-여러 프로그램이 각자 메모리 공간을 할당받고 해당 공간에 데이터 쓰기를 해도, 이는 각자 이뤄지는 것이지 다른 프로그램의 메모리를 업데이트하지는 않는다. 이는 물리적인 메모리를 다른 프로그램과 공유하기보다는, 각 프로그램이 각자의 private memory(**virtual address space**)를 갖기 때문.
+여러 프로그램이 각자 메모리 공간을 할당받는다. 해당 공간에 데이터 쓰기를 해도, 이는 각자의 가상 메모리 공간 내에서 이뤄지며, 다른 프로그램의 메모리를 업데이트하지는 않는다. 이는 물리적인 메모리를 다른 프로그램과 공유하기보다는, 각 프로그램이 각자의 private memory(**virtual address space**)를 갖기 때문이다.
 
-### 동시성(concurrency)
+#### 동시성(concurrency)
+
+> *Concurrent programming*, where different parts of a program execute independently, and *parallel programming*, where different parts of a program execute at the same time.
+>
+> 출처: [Fearless Concurrency](https://doc.rust-lang.org/book/ch16-00-concurrency.html)
+
+OS는 여러 프로세스를 저글링 하듯 실행시키며, 각 프로세스는 또 여러 쓰레드를 가질 수 있다.
+
+`thread`는,
+1. 다른 함수와 같은 메모리 공간에서 실행되는 함수로 생각할 수 있으며,
+2. 여러 개의 스레드가 동시에 활성화될 수 있다.

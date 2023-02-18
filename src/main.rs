@@ -12,5 +12,7 @@ use util::args::{ArgsMap, Config};
 fn main() {
     let _args = Config.parse();
     // cpu::print_and_sleep(_args.get("--param").unwrap().to_string());
-    memory::alloc_then_print_and_sleep();
+    // memory::print_memory_and_sleep();
+    // memory::alloc_then_print_and_sleep();
+    concurrency::wrongly_working_concurrency_program(100_000);
 }
