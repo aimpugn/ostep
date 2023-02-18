@@ -8,6 +8,7 @@
             - [virtualizing the CPU](#virtualizing-the-cpu)
             - [virtualizing the Memory](#virtualizing-the-memory)
             - [동시성(concurrency)](#동시성concurrency)
+            - [저장(persistence)](#저장persistence)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -53,3 +54,26 @@ OS는 여러 프로세스를 저글링 하듯 실행시키며, 각 프로세스�
 `thread`는,
 1. 다른 함수와 같은 메모리 공간에서 실행되는 함수로 생각할 수 있으며,
 2. 여러 개의 스레드가 동시에 활성화될 수 있다.
+
+같은 메모리 공간에서 여러 함수가 같이 실행되므로, 만약 공유되는 메모리가 있고 이를 동시에 접근하게 된다면, 의도하지 않은 결과가 나올 수 있다.
+
+```rs
+fn worker() {
+    for _i in 1..=WORKER_LOOPS {
+        // 1. load the value of the counter(shared) from memory into a register
+        COUNTER += 1; // 2.one to increment it and, 3. store it back into memory
+    }
+}
+```
+
+위 함수에서 `COUNTER`를 증가시키는 것은 세 가지 명령어(instruction)으로 구성된다
+1. 공유되고 있는 `COUNTER`를 메모리에서 레지스터로 불러온다
+2. 1을 증가시킨다
+3. 증가된 `COUNTER`를 메모리에 저장한다
+
+그런데 이 함수를 여러 쓰레드에서 동시에 실행시킬 떄, 저 세 명령어는 한번에 원자적(**atomically**)으로 실행되지 않는다. 따라서:
+1. A 쓰레드에서 1을 증가시킬 때 B 쓰레드에서는 1을 증가시킨 값을 저장하고
+2. 그 다음에 A 쓰레드가 증가시킨 값을 저장하면,
+3. B가 증가시킨 값은 사라지게 된다
+
+#### 저장(persistence)
