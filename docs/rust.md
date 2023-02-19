@@ -13,6 +13,7 @@
             - [flamegraph](#flamegraph)
     - [Attributes](#attributes)
         - [Built-in attributes index](#built-in-attributes-index)
+    - [`?` operator](#-operator)
 
 ## vscode settings
 
@@ -179,3 +180,10 @@ inner와 outer 속성이 있으며, 차이점은 작동 방식이 아닌, 적�
 - Macros
 - Diagnostics
 - ABI, linking, symbols, and FFI
+
+## `?` operator
+
+```rs
+// the `?` operator can only be applied to values
+// that implement `Try` the trait `Try` is not implemented for `&mut
+```
