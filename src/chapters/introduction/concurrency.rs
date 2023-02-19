@@ -24,6 +24,8 @@ pub fn wrongly_working_concurrency_program(loops: i32) {
     // so we cannot use it here
 }
 
+/// It wrongly works because
+/// the instructions(1, 2, 3) do not execute `atomically`
 fn wrongly_working_concurrency_worker() {
     unsafe {
         for _i in 1..=WORKER_LOOPS {
@@ -31,5 +33,4 @@ fn wrongly_working_concurrency_worker() {
             COUNTER += 1; // 2.one to increment it and, 3. store it back into memory
         }
     }
-    // It wrongly works because the instructions above do not execute atomically
 }
