@@ -7,8 +7,9 @@
         - [가상화(virtualization)](#가상화virtualization)
             - [virtualizing the CPU](#virtualizing-the-cpu)
             - [virtualizing the Memory](#virtualizing-the-memory)
-            - [동시성(concurrency)](#동시성concurrency)
-            - [저장(persistence)](#저장persistence)
+        - [동시성(concurrency)](#동시성concurrency)
+        - [저장(persistence)](#저장persistence)
+        - [Desgin Goal](#desgin-goal)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -43,7 +44,7 @@ a single CPU as the seemingly infinite number of CPU.
 
 여러 프로그램이 각자 메모리 공간을 할당받는다. 해당 공간에 데이터 쓰기를 해도, 이는 각자의 가상 메모리 공간 내에서 이뤄지며, 다른 프로그램의 메모리를 업데이트하지는 않는다. 이는 물리적인 메모리를 다른 프로그램과 공유하기보다는, 각 프로그램이 각자의 private memory(**virtual address space**)를 갖기 때문이다.
 
-#### 동시성(concurrency)
+### 동시성(concurrency)
 
 > *Concurrent programming*, where different parts of a program execute independently, and *parallel programming*, where different parts of a program execute at the same time.
 >
@@ -76,7 +77,7 @@ fn worker() {
 2. 그 다음에 A 쓰레드가 증가시킨 값을 저장하면,
 3. B가 증가시킨 값은 사라지게 된다
 
-#### 저장(persistence)
+### 저장(persistence)
 
 CPU나 메모리처럼 애플리케이션마다 가상화된 디스크를 만들지 않는다.
 그보다는 오히려 파일의 정보를 **공유**하길 원한다고 가정한다
@@ -93,3 +94,35 @@ CPU나 메모리처럼 애플리케이션마다 가상화된 디스크를 만들
 만약 쓰기 sequence 동안 실패한다면 나중에 시스템이 합리적인 상태로 복구될 수 있도록 디스크에 대한 쓰기 순서를 신중하게 지정한다.
 
 서로 다른 공통 작업을 효율적으로 만들기 위해, file system은 간단한 목록에서부터 복잡한 b-tree까지 많은 다양한 자료 구조, 액세스 방법을 사용한다.
+
+### Desgin Goal
+
+- `virtualization` of resources
+    - cpu
+    - memory
+    - disk
+- treat `concurrency`
+- `persistent` data
+- `abstractions`
+    - 큰 프로그램을 작성할 수 있도록 이를 이해할 수 있는 작은 조각들로 분할하는 것
+    - `C > assembly > logic gate > processor > transistors`에서 C 언어로 개발할 때, 그 아래에 있는 것들을 신경쓰지 않도록 하는 것
+- `protection` & `isolation`
+    - 동시에 실행되는 애플리케이션이 서로 잘못된 영향을 주지 않도록 해야 한다
+    - 그리고 OS 자체를 오염시키지 않아야 한다
+- `reliability`
+- `energy-efficiency`
+- `security`
+- `mobility`
+
+OS가 개발되면서 축적된 아이디어들에 대해 알아보는 것도 설계에서 무엇이 중요한지 아는 데 도움이 된다.
+- [BRINCH-HANSEN ON THE HISTORY OF OPERATING SYSTEMS](http://tristram.squarespace.com/home/2007/2/20/brinch-hansen-on-the-history-of-operating-systems.html)
+- `procedure call`과 `system call`
+    - `system call`은 하드웨어 권한 수준(hardware privilge level)을 높인다
+    - [Difference Between System Call, Procedure Call, and Function Call](https://www.8bitavenue.com/difference-between-system-call-procedure-call-and-function-call/)
+    - [Remote Procedure Calss vs Local Procedure Calls](https://www.baeldung.com/cs/remote-vs-local-procedure-calls)
+    - [What is the difference between system calls and procedure calls?](https://qr.ae/pGdCgo)
+    - [What Is the Difference Between Trap and Interrupt?](https://www.baeldung.com/cs/os-trap-vs-interrupt)
+- `multiprogramming`
+    - CPU 활용도 향상 목적
+    - 여러 job들을 메모리에 로드하고 빠르게 switch
+    - I/O 장치가 느렸었는데, I/O 장치가 서비스 되는 동안 프로그램이 CPU에서 대기하는 것은 CPU 시간 낭비였기 때문

@@ -2,6 +2,7 @@
 
 - [Rust](#rust)
     - [vscode settings](#vscode-settings)
+    - [package layout](#package-layout)
     - [`crate` and `modules`](#crate-and-modules)
         - [crate](#crate)
         - [modules](#modules)
@@ -26,6 +27,10 @@ rustup component add rust-src
 ```
 
 - 만약 std 라이브러리로 진입하지 못한다면, [러스트 커뮤니티 쓰레드](https://users.rust-lang.org/t/solved-how-to-step-into-std-source-code-when-debugging-in-vs-code/25319) 참고
+
+## package layout
+
+- [Package Layout](https://doc.rust-lang.org/cargo/guide/project-layout.html)
 
 ## `crate` and `modules`
 

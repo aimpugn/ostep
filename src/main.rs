@@ -16,5 +16,6 @@ fn main() {
     // memory::print_memory_and_sleep();
     // memory::alloc_then_print_and_sleep();
     // concurrency::wrongly_working_concurrency_program(100_000);
-    persistence::write_hello_world();
+    // persistence::write_hello_world();
+    println!("{}", env::var("CARGO_MANIFEST_DIR").unwrap())
 }
