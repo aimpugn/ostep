@@ -10,6 +10,18 @@
         - [동시성(concurrency)](#동시성concurrency)
         - [저장(persistence)](#저장persistence)
         - [Desgin Goal](#desgin-goal)
+    - [The Abstraction: The Process](#the-abstraction-the-process)
+        - [Process API](#process-api)
+        - [Process Creation: A Littel More Detail](#process-creation-a-littel-more-detail)
+        - [Process States](#process-states)
+        - [Data Structures](#data-structures)
+    - [Interlude: Process API](#interlude-process-api)
+        - [`fork()`](#fork)
+        - [`wait()`](#wait)
+        - [`exec()`](#exec)
+        - [API 동기부여](#api-동기부여)
+        - [프로세스 제어와 유저](#프로세스-제어와-유저)
+        - [기타 유용한 툴들](#기타-유용한-툴들)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -125,4 +137,204 @@ OS가 개발되면서 축적된 아이디어들에 대해 알아보는 것도 �
 - `multiprogramming`
     - CPU 활용도 향상 목적
     - 여러 job들을 메모리에 로드하고 빠르게 switch
-    - I/O 장치가 느렸었는데, I/O 장치가 서비스 되는 동안 프로그램이 CPU에서 대기하는 것은 CPU 시간 낭비였기 때문
+    - 느린 I/O 장치가 서비스 되는 동안 프로그램이 CPU에서 대기하면 CPU 시간 낭비
+
+## The Abstraction: The Process
+
+`process` == `running program`
+- 프로그램 그자체는 실행되길 기다리는 명령어 뭉치일 뿐이다
+- OS가 이 byte를 실행
+- `process`는 프로그램을 실행하는 OS가 제공하는 추상화
+
+CPU의 `time sharing`이라는 기본적인 테크닉 통해서 여러 프로그램을 동시에 실행할 수 있도록 한다.
+- 낮은 수준의 기계(`machinery`)를 `mechanisms`(작동 방식)이라 부른다
+    - 저수준의 메서드 또는 프로토콜
+    - `time sharing` & `context switch`
+- 높은 수준의 지능이 `policies`라는 형태로 OS에 존재
+    - 정책은 OS에서 어떤 결정을 내리기 위한 알고리즘
+    - `scheduling policy`
+
+`machine state`: 프로그램 실행 중 읽거나 업데이트할 수 있는 것
+- `memory`
+    - `address space`
+- `registers`
+    - `program counter`(PC) == `instruction pointer`(IP)
+        - 어떤 프로그램 명령어가 다음에 실행될지 말해준다
+    - `stack pointer` & `frame pointer`
+        - 함수 파라미터, 로컬 변수, 반환 주소(return addresses)을 관리
+
+### Process API
+
+프로세스와 관련하여 프로그램이 할 수 있는 요청들
+- `Create`
+- `Destroy`
+- `Wait`
+- `Miscellaneous Control`
+- `Status`
+
+### Process Creation: A Littel More Detail
+
+> `load` code and static data from `disk` into `memory`
+- load 방식
+    - `eagerly`: 프로그램 실행 전에 한번에 로드
+    - `lazily`: 프로그램 실쟁 동안 필요할 때 코드 조각과 데이터 로드
+        - by `paging` & `swapping` of memory
+- memory for `run-time stack`(a.k.a `stack`)
+    - 인자(arguments)와 함께 스택을 초기화
+    - 인자는 `argc`, `argv` 같은 배열로 `main()` 함수의 파라미터로 전달된다
+- memory for `heap`
+    - 명시적으로 요청되는, 동적으로 할당되는 데이터 위해 사용
+    - 프로그램은 `malloc()` 같은 함수 호출해서 공간 요청
+- default three `file descriptors`
+    - STDIN
+    - STDOUT
+    - STRERR
+
+### Process States
+
+- `Running`: 프로세서에서 프로세스 실행중. 즉, 명령어 실행중
+- `Ready`: 실행 준비 단계지만, 어떤 이유로 OS가 선택하지 않음
+- `Blocked`: 다른 이벤트가 발생할 때까지 `Ready` 되지 않도록 만드는 작업을 프로세스가 수행한 경우. 가령 디스크에 I/O 요청을 발생시켰을 때, 블락되고 다른 프로세스가 processor를 사용
+
+상태의 변화는 OS의 재량에 따르며, 이런 결정은 OS `scheduler`가 결정한다
+- `Ready` to `Running`: scheduled
+- `Running` to `Ready`: unscheduled
+- `Running` -> initiate I/O request -> `Blocked` -> I/O completion -> `Ready`
+
+### Data Structures
+
+```c
+// the registers xv6 will save and restore 
+// to stop and subsequently restart a process
+struct context {
+  int eip;
+  int esp;
+  int ebx;
+  int ecx;
+  int edx;
+  int esi;
+  int edi;
+  int ebp;
+};
+
+// the different states a process can be in
+enum proc_state { 
+  UNUSED, 
+  EMBRYO, 
+  SLEEPING,
+  RUNNABLE, 
+  RUNNING, 
+  ZOMBIE // 종료됐지만 아직 정리되지 않은 프로세스 
+};
+
+// the information xv6 tracks about each process
+// including its register context and state
+struct proc {
+  char *mem; // Start of process memory
+  uint sz; // Size of process memory
+  char *kstack; // Bottom of kernel stack
+  // for this process
+  enum proc_state state; // Process state
+  int pid; // Process ID
+  struct proc *parent; // Parent process
+  void *chan; // If !zero, sleeping on chan
+  int killed; // If !zero, has been killed
+  struct file *ofile[NOFILE]; // Open files
+  struct inode *cwd; // Current directory
+  struct context context; // Switch here to run process
+  struct trapframe *tf; // Trap frame for the
+  // current interrupt
+};
+```
+
+## Interlude: Process API
+
+Unix 시스템은 프로세스 생성 위해 `fork()`와 `exec()`이라는 시스템 콜 한 쌍을 제공
+`wait()`는 자신이 생성한 프로세스가 완료되기를 기다리려는 프로세스에서 사용할 수 있다
+
+### `fork()`
+
+### `wait()`
+
+부모 프로세스와 자식 프로세스 중 무엇이 먼저 실행될지는 모르지만, `wait()` 시스템 콜을 사용해서
+부모 프로세스가 먼저 실행될 경우 자식 프로세스를 기다리게 한다
+
+```rs
+// 부모 프로세스인 경우
+Ok(NixParent { child, .. }) => {
+    let result = waitpid(child, None);
+    ... 생략 ...
+}
+```
+
+### `exec()`
+
+프로그램에서 다른 프로그램을 실행할 때 사용
+`execvp()`은 코드(그리고 정적 데이터)를 그 실행할 수 프로그램에서 **로드**(load)해서 현재 코드 segment(와 현재 정적 데이터)를 덮어쓴다. 프로그램의 heap과 stack, 그리고 다른 메모리 공간들은 다시 초기화 된다. 그리고 OS는 그 프로그램을 실행시키고, 그 프로세스의 `argv`로 인자들을 넘긴다.
+
+```rs
+let words = execvp(
+    &str_to_c_string("wc"),
+    &[
+        str_to_c_string("-cl"), // 안 먹히는듯?
+        str_to_c_string(
+            (env::current_dir().unwrap().as_path().display().to_string()
+                + "/Cargo.toml")
+                .as_str(),
+        ),
+    ],
+);
+```
+
+따라서 새로운 프로세스를 생성하는 것이 아니라, 그보다는 현재 실행중인 프로그램을 다른 실행중인 프로그램(`wc`)로 변환한다.
+자식 프로세스에서 `exec()`이 실행된 후에는 마치 부모 프로세스가 실행되지 않은 것과 같다. `exec()` 함수 호출이 성공하면 리턴하지 않기 때문이다.
+
+### API 동기부여
+
+이런 `fork()`와 `exec()`의 분리는 Unix shell을 빌드하는 데 필수적이다. 이런 `fork()`와 `exec()`의 분리는 shell이 **`fork()` 호출 다음**, **`exec()` 호출 전**에 코드를 실행하도록 하기 때문에, 이 코드는 실행 예정인(about-to-be-run) 프로그램의 환경을 바꿀 수 있고, 따라서 다양한 흥미로운 기능들을 쉽게 구현할 수 있다.
+
+shell은 유저 프로그램이다. prompt가 나타나고, 뭔가 타이핑하길 기다린다.
+커맨드를 타이핑하면, 대부분의 경우, 쉘은 다음과 같이 작동한다
+1. 실행할 수 있는 프로그램이 파일 시스템 어디에 위치하는지 파악하고
+2. 커맨드를 실행하기 위해 `fork()`를 호출하여 새로운 자식 프로세스를 만들고
+3. 커맨드를 실행하기 위해 여러 `exec()` 변형 중 하나를 호출
+4. `wait()` 호출하여 커맨드가 완료될 때까지 대기
+5. 자식 프로세스가 끝나면 쉘은 `wait()`에서 돌아오며, prompt를 다시 출력하고 다음 커맨드를 기다린다
+
+```shell
+wc /Users/rody/VscodeProjects/ostep/Cargo.toml > /Users/rody/VscodeProjects/ostep/tmp/wc_output.txt
+```
+
+`>` 통해서 `wc`의 출력은 `wc_output.txt` 파일로 리다이렉트 된다.
+1. `wc` 프로그램이 파일 시스템 어디에 위치하는지 파악
+2. 커맨드를 실행하기 위해 `fork()`를 호출하여 새로운 자식 프로세스를 만들고
+3. standard output을 닫고 `wc_output.txt`을 연다(이로 인해 곧 실행될(soon-to-be-running) 프로그램 `wc`의 출력은 스크린 대신 파일로 보내진다)
+4. 커맨드를 실행하기 위해 여러 `exec()` 변형 중 하나를 호출
+5. `wait()` 호출하여 커맨드가 완료될 때까지 대기
+6. 자식 프로세스가 끝나면 쉘은 `wait()`에서 돌아오며, prompt를 다시 출력하고 다음 커맨드를 기다린다
+
+유닉스 파이프는 같은 방식으로 구현되지만, `pipe()` 시스템 콜을 호출한다.
+1. 한 프로세스의 출력이 커널 내부(in-kernal)의 파이프(즉, 큐)로 연결되고,
+2. 다른 프로세스의 입력 부분이 같은 파이프로 연결된다.
+3. 따라서 한 프로세스의 출력이 매끄럽게 다음 프로그램의 입력으로 사용된다.
+
+### 프로세스 제어와 유저
+
+- `kill()`: 프로세스에 signal 보낼 때 사용
+    - pause, die 등의 명령어
+    - 편의를 위해 유닉스 쉘에는 특정 키 스트로크 조합이 특정 신호를 보내도록 설정되어 있음
+        - control + c: *SIGINT*(interrupt) 보통 프로세스 종료
+        - control + z: *SIGTSTP*(stop) 실행중 일시 정지. `fg` 같은 내장 명령어로 다시 실행 가능
+    - 외부의 이벤트를 프로세스로 전달하는 신호(signal)들 제공하며, 개별 프로세스와 전체 프로세스 그룹에 신호를 보낼 수 있다
+- `signal()`: 프로세스가 시스템 콜을 캐치하기 위해 사용
+
+그렇다면 누가 시그널을 보낼 수 있고 누구는 보낼 수 없는가? 보통 여러 사용자가 시스템을 사용하며, 누군가 임으로 신호를 보낼 수 있다면 시스템의 사용성과 보안성이 저하된다. 따라서 요즘 시스템은  `user`라는 강력한 개념을 포함한다.
+
+### 기타 유용한 툴들
+
+- `man`
+- `ps`
+- `top`
+- `spawn`
+- `killall`
+- CPU meters like [MenuMeters](http://www.ragingmenace.com/software/menumeters/)

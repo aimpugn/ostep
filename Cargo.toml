@@ -8,4 +8,12 @@ debug = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
+[dependencies.fork]
+version="0.1.20"
+
+[dependencies.nix]
+version="0.26.2"
+
+[dependencies.libc]
+version="0.2"
+

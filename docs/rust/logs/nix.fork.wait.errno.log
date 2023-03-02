@@ -1,0 +1,9 @@
+# https://docs.rs/nix/latest/nix/errno/enum.Errno.html
+
+hello world: (pid: 20228)
+thread 'main' panicked at 'called `Result::unwrap()` on an `Err` value: EINVAL', src/chapters/process/fork.rs:116:14
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+hello, I am child: 20232
+     ~/VscodeProjects/ostep     virtualization/process !5 ?3 ─────────────────────── 11:58:57   
+❯ [0] sleep 1 sec in child(pid: 20232)
+[1] sleep 1 sec in child(pid: 20232)
