@@ -25,12 +25,12 @@ fn introduction() {
 
 fn process() {
     // process_run();
-    // process::fork::test_fork_by_fork();
-    // process::fork::test_fork_by_nix();
-    // process::api::test_fork_by_nix_wait_child();
+    // process::apis::test_fork_by_fork();
+    // process::apis::test_fork_by_nix();
+    process::apis::test_fork_by_nix_wait_child();
     // process::apis::test_exec_wc();
     // process::apis::test_exec_output_redirect();
-    process::apis::test_change_variable_from_child();
+    // process::apis::test_change_variable_from_child();
 }
 
 fn process_run() {

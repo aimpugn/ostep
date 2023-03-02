@@ -92,11 +92,20 @@ pub fn test_fork_by_nix() {
 /// It will print string like below to terminal
 ///
 /// ```log
-/// hello world: (pid: 18114)
-/// hello, I am child: 18118
-/// [1] sleep 1 sec in child(pid: 18118)
-/// [2] sleep 1 sec in child(pid: 18118)
-/// hello, I am parent of 18118, (pid: 18114)
+/// hello world: (pid: 54696)
+/// hello, I am child: 54706
+/// [0] sleep 1 sec in child(pid: 54706)
+/// [1] sleep 1 sec in child(pid: 54706)
+/// [2] sleep 1 sec in child(pid: 54706)
+/// [3] sleep 1 sec in child(pid: 54706)
+/// [4] sleep 1 sec in child(pid: 54706)
+/// [5] sleep 1 sec in child(pid: 54706)
+/// [6] sleep 1 sec in child(pid: 54706)
+/// [7] sleep 1 sec in child(pid: 54706)
+/// [8] sleep 1 sec in child(pid: 54706)
+/// [9] sleep 1 sec in child(pid: 54706)
+/// child 54706, pid 54706 is exited, exit code is 0
+/// hello, I am parent(pid: 54696) of child 54706
 /// ```
 pub fn test_fork_by_nix_wait_child() {
     println!("hello world: (pid: {})", process::id());
@@ -187,7 +196,9 @@ pub fn test_exec_wc() {
              * );
              */
             let words = execvp(
+                // filename of program to be run
                 &str_to_c_string("wc"),
+                // args will be passed to the program
                 &[
                     str_to_c_string("-cl"), // 안 먹히는듯?
                     str_to_c_string(
