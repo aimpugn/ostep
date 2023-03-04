@@ -22,6 +22,10 @@
         - [API 동기부여](#api-동기부여)
         - [프로세스 제어와 유저](#프로세스-제어와-유저)
         - [기타 유용한 툴들](#기타-유용한-툴들)
+    - [Direct Execution](#direct-execution)
+        - [Basic Technique: **Limited** Direct Execution](#basic-technique-limited-direct-execution)
+        - [Problem #1: Restricted Operations](#problem-1-restricted-operations)
+        - [Problem #2: Switching Between Processes](#problem-2-switching-between-processes)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -338,3 +342,175 @@ wc /Users/rody/VscodeProjects/ostep/Cargo.toml > /Users/rody/VscodeProjects/oste
 - `spawn`
 - `killall`
 - CPU meters like [MenuMeters](http://www.ragingmenace.com/software/menumeters/)
+
+## Direct Execution
+
+CPU 가상화는 각 프로세스를 잠깐씩 실행하는 `time sharing`을 통해서 이뤄진다. 그런데 이런 가상화 작동 방식을 구현하는 데는 몇 가지 문제가 있다.
+1. *performance*: 추가적인 부하 없이 가능한가?
+2. *control*: CPU에 대한 제어를 유지하면서 어떦게 프로세스를 효율적으로 실행?
+
+### Basic Technique: **Limited** Direct Execution
+
+`direct execution`? just run the program directly on the CPU
+1. 프로세스 리스트에 프로세스 entry 생성
+2. 프로그램 위한 메모리 할당
+3. 디스크에서 프로그램 코드를 메모리로 로드
+4. `argc`, `argv`로 스택 셋업
+5. registers 비우기
+6. `main()` 같은 루틴의 진입점(entry point)을 찾아서 해당 지점으로 이동
+7. 유저의 코드를 실행시키기 시작
+8. 프로세스의 메모리 해제(free)
+9. 프로세스 리스트에서 삭제
+
+이런 접근 방식은 CPU 가상화에 몇 가지 문제점 야기
+1. 어떻게 OS로 하여금 프로그램이 우리가 원하지 않는 것을 안하게 하도록 보장?
+    - `user mode`, `kernal mode`로 권한 분리
+2. 어떻게 OS가 실행중인 프로그램을 멈추고 다른 프로세스로 전환?
+
+### Problem #1: Restricted Operations
+
+- `user mode`: 프로세스가 원하는대로 모든 자원을 사용하지 못하도록 제한하는 processor mode
+- `kernal mode`: OS가 실행되는 모드로, 모든 제한된 명령을 실행할 수 있다
+
+만약 유저 모드의 프로그램이 권한이 필요한 작업을 수행하길 원한다면? 요즘의 모든 하드웨어는 가상적으로(virtually) system call을 요청할 수 있도록 하고 있다
+
+user mode process
+-> `trap` instruction
+-> jump into kernal
+-> kernal mode
+-> `return-from-trap` call by OS
+
+On x86
+1. The processor will push the program counter, flags, and a few other registers onto a per-process `kernel stack`
+2. the `return-from-trap` will pop these values off the stack
+3. and resume execution of the user-mode program
+
+How does the `trap` know which code to run inside the OS?
+- 호출하는 프로세스는 어떤 주소로 이동해야 하는지 지정할 수 없다. 만약 호출하는 프로세스에서 주소를 지정할 수 있다면 커널 어디로든 이동할 수 있게 된다
+- 따라서 반드시 커널이 `trap`에서 어떤 코드가 실행되는지 신중하게 제어해야 한다
+- 이를 부트 타임에 `trap table`를 설정하여 이를 달성한다
+
+1. At boot
+    1. [OS] initialize `trap table`
+    2. [H/W] CPU remembers *address* of syscall handler(`trap table`). 다음 재부팅 시까지 기억.
+2. At run
+    1. [OS]
+        1. [OS] 프로세스 리스트에 entry 생성
+        2. [OS] 프로그램 메모리 할당
+        3. [OS] 디스크에서 프로그램 코드를 메모리로 로드
+        4. [OS] `argc`, `argv`로 유저 스택 셋업
+        5. [OS] 각 프로세스가 갖는 커널 스택을 reg/PC로 채우기(Clear registers?)
+        6. [OS] `return-from-trap`
+    2. [H/W]
+        1. [H/W] 커널 스택에서 regs 복구
+        2. [H/W] *유저 모드*로 이동
+        3. [H/W] `main()`으로 이동
+    3. [Program]
+        1. [Program] `main()` 실행
+        2. [Program] system call 요청
+        3. [Program] OS로 `trap`
+    4. [H/W]
+        1. [H/W] regs를 커널 스택에 저장
+        2. [H/W] *커널 모드*로 이동
+        3. [H/W] `trap handler`로 이동
+    5. [OS]
+        1. [OS] `trap` 핸들링
+        2. [OS] syscall에 대한 작업 수행
+        3. [OS] `return-from-trap` to return control
+    6. [H/W]
+        1. [H/W] 커널 스택에서 regs 복구
+        2. [H/W] *유저 모드*로 이동
+        3. [H/W] `trap` 이후 PC로 이동
+    7. [Program]
+        1. [Program] return from main
+        2. [Program] `trap`(via `exit()`)
+    8. [OS]
+        1. [OS] 프로세스의 메모리 해제(free)
+        2. [OS] 프로세스 리스트에서 삭제
+
+### Problem #2: Switching Between Processes
+
+만약 프로세스가 CPU에서 실행중이라면, 이는 정의상 OS가 실행되고 있지 않음을 의미. 그렇다면 OS는 어떻게 CPU에 대한 제어를 다시 얻을 수 있을까?
+
+- `cooperative` 접근법: 시스템 콜을 기다린다
+    - 프로세스가 정상적으로 행동할 것으로 신뢰
+    - 대부분의 프로세스가 상당히 자주 system call 요청
+    - 이런 시스템은 주로 명시적인 `yield` 시스템 콜을 포함하며, 이 시스템 콜은 제어를 OS로 넘긴다
+    - 0으로 나누기 한다거나, 접근하면 안 되는 메모리에 접근하려고 할 때, OS에 `trap`을 생성하고, OS는 CPU에 대한 제어를 다시 얻게 된다
+- `Non-cooperative` 접근법: OS가 제어를 가져온다
+    - `timer interrupt`: 수 밀리초마다 interrupt 발생시키고, 미리 구성된 `interrupt handler` 실행
+    - 이 타이머 또한 꺼질 수 있으며, 나중에 동시성(concurrency)를 더 깊게 이해할 때 논하기로 한다
+    - 인터럽트 발생 시 나중에 `return-from-trap` 때 중지된 프로그램이 정상적으로 다시 시작될 수 있도록, 하드웨어는 실행중이던 프로그램의 충분한 상태를 저장할 책임이 있다
+
+어떤 식으로든 OS가 프로세스 스위칭을 결정하면, OS는 `context switch`라는 저수준의 코드 조각을 실행
+
+// TODO: 나중에 다시 보기
+1. At boot
+    1. [OS]
+        1. [OS] initialize trap table
+    2. [H/W]
+        1. [H/W] remember addresses of syscall handler
+        2. [H/W] remember addresses of timer handler
+    3. [OS]
+        1. [OS] start interrupt timer
+    4. [H/W]
+        1. [H/W] start timer
+        2. [H/W] interrupt CPU in X ms
+2. At run
+    1. [A Process]...
+    2. [H/W]
+        1. [H/W] timer interrupt
+        2. [H/W] save (A)regs → (A)kernal-stack
+        3. [H/W] move to kernel mode
+        4. [H/W] jump to trap handler
+    3. [OS]
+        1. [OS] Handle the trap
+        2. [OS] timer interrupt handler decides to switch from A-process to B-process
+        3. [OS] Call `switch()` routine
+        4. [OS] save (A)regs → to (A)process-structure in memory
+        5. [OS] restore (B)regs ← from (B)process-structure in memory
+        6. [OS] switch to (B)kernal-stack by changing the stack pointer(`switch context`)
+        7. [OS] `return-from-trap` (into B)
+    4. [H/W]
+        1. [H/W] restore (B)regs ← (B)kernal-stack
+        2. [H/W] move to user mode
+        3. [H/W] jump to B’s PC
+    5. [B Process]...
+
+```assembly
+### context switch code for xv6
+# void swtch(struct context **old, struct context *new);
+#
+# Save current register context in old
+# and then load register context from new.
+.globl swtch
+swtch:
+    # Save old registers
+    movl 4(%esp), %eax      # put old ptr into eax
+    popl 0(%eax)            # save the old IP
+    movl %esp, 4(%eax)      # and stack
+    movl %ebx, 8(%eax)      # and other registers
+    movl %ecx, 12(%eax)
+    movl %edx, 16(%eax)
+    movl %esi, 20(%eax)
+    movl %edi, 24(%eax)
+    movl %ebp, 28(%eax)
+
+    # Load new registers
+    movl 4(%esp), %eax      # put new ptr into eax
+    movl 28(%eax), %ebp     # restore other registers
+    movl 24(%eax), %edi
+    movl 20(%eax), %esi
+    movl 16(%eax), %edx
+    movl 12(%eax), %ecx
+    movl 8(%eax), %ebx
+    movl 4(%eax), %esp      # stack is switched here
+    pushl 0(%eax)           # return addr put in place
+    ret                     # finally return into new ctxt
+```
+
+동시에 interrupt가 발생하는 것을 방지하기 위해 인터럽트가 실행중인 경우에는 다른 인터럽트를 불가능하게 만들 수 있다. 또는 locking 통해서 내부 자료 구조에 동시에 접근하는 것을 방지한다.
+
+`lmbench` 툴을 사용하면 컨텍스트 스위칭, 시스템 콜 등에lmbench 소요되는 시간 측정 가능.
+타이머는 `gettimeofday()`, `rdtsc` of x86 등 참고
+`sched_setaffinity()`로 프로세스를 특정 프로세서에 바인드 가능
