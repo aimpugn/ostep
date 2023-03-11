@@ -26,6 +26,16 @@
         - [Basic Technique: **Limited** Direct Execution](#basic-technique-limited-direct-execution)
         - [Problem #1: Restricted Operations](#problem-1-restricted-operations)
         - [Problem #2: Switching Between Processes](#problem-2-switching-between-processes)
+    - [Scheduling](#scheduling)
+        - [Workload Assumptions](#workload-assumptions)
+        - [Scheduling Metrics](#scheduling-metrics)
+        - [First In, First Out (FIFO)](#first-in-first-out-fifo)
+        - [Shortest Job First (SJF)](#shortest-job-first-sjf)
+        - [Shortest Time-to-Completion First (STCF)](#shortest-time-to-completion-first-stcf)
+        - [A New Metric: Response Time](#a-new-metric-response-time)
+        - [Round Robin](#round-robin)
+        - [Incorporating I/O](#incorporating-io)
+        - [No More Oracle](#no-more-oracle)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -514,3 +524,263 @@ swtch:
 `lmbench` 툴을 사용하면 컨텍스트 스위칭, 시스템 콜 등에lmbench 소요되는 시간 측정 가능.
 타이머는 `gettimeofday()`, `rdtsc` of x86 등 참고
 `sched_setaffinity()`로 프로세스를 특정 프로세서에 바인드 가능
+
+## Scheduling
+
+- for turnaround time
+    - SJF
+    - STCF
+- for response time
+    - Round Robin
+
+### Workload Assumptions
+
+process(또는 job)에 대한 가정
+> 1. 각 job은 같은 시간 동안 실행  
+> 2. 모든 job은 동시에 도착(arrive)
+> 3. 한번 시작하면 모든 job은 완료될 때까지 실행
+> 4. 모든 job은 CPU만 사용(I/O 없음)
+> 5. 각 job의 run-time은 알고 있다
+
+### Scheduling Metrics
+
+> `metric`?
+> something that we use to *measure* something
+
+스케쥴링 시 여러 메트릭이 존재할 수 있지만, 여기서는 간단하게 처리 시간(`turnaround time`) 지표만 고려.
+
+> `turnaround time`?
+> the time at which the job completes minus the time at which the job arrived in the system
+>
+> $T_{turnaround} = T_{completion} - T_{arrival}$
+
+앞서 모든 job이 동시에 arrive한다고 가정했으므로, $T_{arrival} = 0$으로 보고, 따라서 $T_{turnaround} = T_{completion}$이 된다.
+
+### First In, First Out (FIFO)
+
+First Come, First Served
+
+```mermaid
+gantt
+    dateFormat mm:ss
+    axisFormat %M:%S
+    title Simple scheduling
+    section Running
+    A: a1, 00:00, 10s
+    B: b1, after a1, 10s
+    C: c1, after b1, 10s
+```
+
+평균 turnaround time은 ${{10+20+30 \over 3} = 20}$
+
+> ~~1. 각 job은 같은 시간 동안 실행~~ 가정 제거  
+> 2. 모든 job은 동시에 도착(arrive)  
+> 3. 한번 시작하면 모든 job은 완료될 때까지 실행  
+> 4. 모든 job은 CPU만 사용(I/O 없음)  
+> 5. 각 job의 run-time은 알고 있다  
+
+```mermaid
+gantt
+    dateFormat mm:ss
+    axisFormat %M:%S
+    title Simple scheduling
+    section Running
+    A: a1, 00:00, 100s
+    B: b1, after a1, 10s
+    C: c1, after b1, 10s
+```
+
+평균 turnaround time은 ${{100+110+120 \over 3} = 110}$
+
+이렇게 상대적으로 짧은 시간 동안 자원을 소비하는 것이 자원을 크게 소모하는 것보다 나중에 대기열에 들어오는 것을 일반적으로 `convoy effect`라고 한다.
+
+### Shortest Job First (SJF)
+
+```mermaid
+gantt
+    dateFormat mm:ss
+    axisFormat %M:%S
+    title Simple scheduling
+    section Running
+    B: b1, 00:00, 10s
+    C: c1, after b1, 10s
+    A: a1, after c1, 100s
+```
+
+평균 turnaround time은 ${{10+20+120 \over 3} = 50}$
+
+> ~~1. 각 job은 같은 시간 동안 실행~~ 가정 제거  
+> ~~2. 모든 job은 동시에 도착(arrive)~~ 가정 제거  
+> 3. 한번 시작하면 모든 job은 완료될 때까지 실행  
+> 4. 모든 job은 CPU만 사용(I/O 없음)  
+> 5. 각 job의 run-time은 알고 있다  
+
+```mermaid
+gantt
+    dateFormat mm:ss
+    axisFormat %M:%S
+    title Simple scheduling
+    section Running
+    A: a1, 00:00, 100s
+    B: b1, after a1, 10s
+    C: c1, after b1, 10s
+    section Arrival
+    B,C: arrival_bc, 00:10, 0s
+```
+
+평균 turnaround time은 ${{100+(110-10)+(120-10) \over 3} = 103.33}$
+
+### Shortest Time-to-Completion First (STCF)
+
+> ~~1. 각 job은 같은 시간 동안 실행~~ 가정 제거  
+> ~~2. 모든 job은 동시에 도착(arrive)~~ 가정 제거  
+> ~~3. 한번 시작하면 모든 job은 완료될 때까지 실행~~ 가정 제거  
+> 4. 모든 job은 CPU만 사용(I/O 없음)  
+> 5. 각 job의 run-time은 알고 있다  
+
+타이머 인터럽트와 컨텍스트 스위칭에 대해 논의했던 바와 같이, 스케쥴러는 B와 C가 도착하면 그와 비슷한 작업을 수행할 수 있다.
+
+job A를 중단시킨(preempt) 후 다른 작업들을 실행시키고, 나중에 A를 다시 재개할 수 있다.
+
+```mermaid
+gantt
+    dateFormat mm:ss
+    axisFormat %M:%S
+    title Simple scheduling
+    section Running
+    A: a1, 00:00, 10s
+    B: b1, after a1, 10s
+    C: c1, after b1, 10s
+    A: a2, after c1, 90s
+    section Arrival
+    B,C: arrival_bc, after a1, 0s
+```
+
+`SJF`에 선점(preemption)할 수 있도록 한 것을, `Shortest Time-to-Completion First (STCF)` 또는 `Preemptive Shortest Job First (PSJF)`라고 한다
+
+평균 turnaround time은 ${{(120-0)+(20-10)+(30-10) \over 3} = 50}$
+
+### A New Metric: Response Time
+
+초기 배치 컴퓨터 시스템에서는 이 정도 알고리즘의 스케쥴링으로도 괜찮았다. 하지만, 시분할 머신(time-shared machine)의 등장으로 사용자들은 시스템과 상호작용할 수 있는 퍼포먼스를 기대하게 됐고, 그에 따라 새로운 지표인 `response time`이 등장하게 됨.
+
+이를 job이 도작한 때부터 처음 스케쥴 되는 때까지의 시간으로 정의.
+
+$T_{response} = T_{first\_run} - T_{arrival}$
+
+```mermaid
+gantt
+    dateFormat mm:ss
+    axisFormat %M:%S
+    title Simple scheduling
+    section Running
+    A: a1, 00:00, 10s
+    B: b1, after a1, 10s
+    C: c1, after b1, 10s
+    A: a2, after c1, 90s
+    section Arrival
+    B,C: arrival_bc, after a1, 0s
+```
+
+- response time avg: 3.33
+    - A: 0  (00:00 도착, 00:00 스케쥴)
+    - B: 0  (00:10 도착, 00:10 스케쥴)
+    - C: 10 (00:10 도착, 00:20 스케쥴)
+
+### Round Robin
+
+> what RR is doing is stretching out each job as long as it can, by only running each job for a short bit before moving to the next.
+
+job을 완료할 때까지 실행시키는 대신, 시간 할당량(time slice, 또는 scheduling quantum 시간 양자) 동안 job을 실해이키고 실행 큐의 다른 job을 실행
+
+시간 할당량의 길이는 timer-interrupt 기간의 곱이어야 한다. 따라서 timer-interrupt가 10ms라면, 시간 할당량은 10ms, 20ms...여야 한다.
+
+시간 할당량이 1초인 경우 작업들을 빠르게 순환(cycle)
+
+```mermaid
+gantt
+    dateFormat mm:ss
+    axisFormat %S
+    title Simple scheduling
+    section Running
+    A: a1, 00, 1s
+    B: b1, after a1, 1s
+    C: c1, after b1, 1s
+    A: a2, after c1, 1s
+    B: b2, after a2, 1s
+    C: c2, after b2, 1s
+    A: a3, after c2, 1s
+    B: b3, after a3, 1s
+    C: c3, after b3, 1s
+    A: a4, after c3, 1s
+    B: b4, after a4, 1s
+    C: c4, after b4, 1s
+    A: a5, after c4, 1s
+    B: b5, after a5, 1s
+    C: c5, after b5, 1s
+```
+
+시간 할당량이 짧을수록 `response time` 지표상의 성능이 더 좋아지지만, context switching 비용이 전체 성능을 지배하게 된다
+
+따라서 시간 할당량은
+1. 컨텍스트 스위칭 비용을 분산(amortize) 시킬만큼 길되,
+2. 너무 길어서 시스템이 응답하지 못할 정도
+
+가령 시간 할당량 10ms에 context switching 비용이 1ms라면, 10%의 시간이 컨텍스트 스위칭에 사용되고 낭비된다. 이를 분산하기 위해 만약 시간 할당량을 100ms로 늘린다면, 1%의 시간이 컨텍스트 스위칭에 사용되고 시간 할당량의 비용이 분산된다.
+
+시간 할당량이 1s이고, 실행 시간이 각 5초인 A, B, C 세 프로그램이 RR로 스케쥴링될 때,
+A는 13초, B는 14초, C는 15초에 끝나고, 평균 14초가 소요되는데, 처리량 지표에서는 상당히 좋지 않다.
+
+만약 FIFO라면, 각각 5초, 10초, 15초에 끝나고, ${5 + 10 + 15 \over 3} = 10$ 초가 된다.
+
+불공정하게 시간 배분
+-> 더 짧은 시간의 job을 먼저 실행하여 처리 시간 지표에서 성능 향상
+-> 하지만 응답 시간 지표에서 성능 하락
+
+공정하게 시간 배분
+-> 응답 시간 지표에서 성능 향상
+하지만 처리 시간 지표에서 성능 하락
+
+### Incorporating I/O
+
+> ~~1. 각 job은 같은 시간 동안 실행~~ 가정 제거  
+> ~~2. 모든 job은 동시에 도착(arrive)~~ 가정 제거  
+> ~~3. 한번 시작하면 모든 job은 완료될 때까지 실행~~ 가정 제거  
+> ~~4. 모든 job은 CPU만 사용(I/O 없음)~~ 가정 제거  
+> 5. 각 job의 run-time은 알고 있다  
+
+A: 50ms of CPU, and I/O per 10ms
+B: 50ms of CPU only
+I/O: 10ms
+
+1. STCF & I/O 고려하지 않는 경우
+A와 B의 실행 실행 시간이 같으므로 다른 프로그램을 선점하지 않게 된다. 이때 A가 먼저 실행되면, 10ms마다 I/O가 실행되어 실제로는 A만 90ms의 시간이 소요된다
+
+```text
+CPU     A       A       A       A       A   B   B   B   B   B
+DISK        A       A       A       A
+            20      40      50      80      100     120     140
+```
+
+2. STCF & I/O 고려하는 경우
+A의 I/O per 10ms를 하나의 서브 job으로 본다면, STCF 정책에 따라 더 짧은 A의 10ms sub job을 실행하고, 그 작업이 끝나면 남은 B를 실행하고, 다시 A의 sub job을 실행하게 된다. 이렇게 함으로써 겹침(`overlap`)이 가능하고, I/O가 끝나길 기다리는 동안 다른 프로세스를 위해 CPU를 사용할 수 있다
+
+```text
+CPU     A   B   A   B   A   B   A   B   A   B
+DISK        A       A       A       A
+            20      40      50      80      100     120     140
+```
+
+각 CPU burst를 하나의 작업(job)으로 처리함으로써, 스케쥴러는 interactive한 프로세스가 자주 실행되도록 보장
+
+### No More Oracle
+
+> ~~1. 각 job은 같은 시간 동안 실행~~ 가정 제거  
+> ~~2. 모든 job은 동시에 도착(arrive)~~ 가정 제거  
+> ~~3. 한번 시작하면 모든 job은 완료될 때까지 실행~~ 가정 제거  
+> ~~4. 모든 job은 CPU만 사용(I/O 없음)~~ 가정 제거  
+> ~~5. 각 job의 run-time은 알고 있다~~ 가정 제거  
+
+실제로는 OS가 각 작업의 시간을 아는 경우는 드물다. OS가 미래를 볼 볼 수는 없기 때문이다.
+
+이를 해결하기 위해 최근 과거를 사용하여 미래를 예측하는 스케쥴러를 알아보도록 할 것이다. 이는 multi-level feedback queue(MLFQ)로 알려져 있다.
