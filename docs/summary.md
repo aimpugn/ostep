@@ -36,6 +36,17 @@
         - [Round Robin](#round-robin)
         - [Incorporating I/O](#incorporating-io)
         - [No More Oracle](#no-more-oracle)
+    - [Scheduling: The Multi-Level Feedback Queue](#scheduling-the-multi-level-feedback-queue)
+        - [MLFQ: Basic Rules](#mlfq-basic-rules)
+        - [Attempt #1: How To Change Priority](#attempt-1-how-to-change-priority)
+            - [Example 1: A Single Long-Running Job](#example-1-a-single-long-running-job)
+            - [Example 2: Along Came A Short Job](#example-2-along-came-a-short-job)
+            - [Example 3: What About I/O?](#example-3-what-about-io)
+            - [Problems With Our Current MLFQ](#problems-with-our-current-mlfq)
+        - [Attempt #2: The Priority Boost](#attempt-2-the-priority-boost)
+        - [Attempt #3: Better Accounting](#attempt-3-better-accounting)
+        - [Tuning MLFQ And Other Issues](#tuning-mlfq-and-other-issues)
+    - [요약](#요약)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -723,8 +734,8 @@ gantt
 시간 할당량이 짧을수록 `response time` 지표상의 성능이 더 좋아지지만, context switching 비용이 전체 성능을 지배하게 된다
 
 따라서 시간 할당량은
-1. 컨텍스트 스위칭 비용을 분산(amortize) 시킬만큼 길되,
-2. 너무 길어서 시스템이 응답하지 못할 정도
+1. 컨텍스트 스위칭 비용을 분산(**amortize**) 시킬만큼 길되,
+2. 너무 길어서 시스템이 응답하지 못할 정도는 아니게 해야 한다
 
 가령 시간 할당량 10ms에 context switching 비용이 1ms라면, 10%의 시간이 컨텍스트 스위칭에 사용되고 낭비된다. 이를 분산하기 위해 만약 시간 할당량을 100ms로 늘린다면, 1%의 시간이 컨텍스트 스위칭에 사용되고 시간 할당량의 비용이 분산된다.
 
@@ -739,7 +750,7 @@ A는 13초, B는 14초, C는 15초에 끝나고, 평균 14초가 소요되는데
 
 공정하게 시간 배분
 -> 응답 시간 지표에서 성능 향상
-하지만 처리 시간 지표에서 성능 하락
+-> 하지만 처리 시간 지표에서 성능 하락
 
 ### Incorporating I/O
 
@@ -784,3 +795,178 @@ DISK        A       A       A       A
 실제로는 OS가 각 작업의 시간을 아는 경우는 드물다. OS가 미래를 볼 볼 수는 없기 때문이다.
 
 이를 해결하기 위해 최근 과거를 사용하여 미래를 예측하는 스케쥴러를 알아보도록 할 것이다. 이는 multi-level feedback queue(MLFQ)로 알려져 있다.
+
+## Scheduling: The Multi-Level Feedback Queue
+
+1. optimize turnaround time
+2. minimize response time
+
+### MLFQ: Basic Rules
+
+- has a number of distinct **queues**, each assigned a different **priority level** to decide which job should run at a given time
+    > Rule 1:  
+    > $\text{if }{Priority(A) \gt Priority(B)}\text{, then run A}$
+- if multiple jobs with same priority, round-robin scheduling among those jobs
+    > Rule 2:  
+    > $\text{if }{Priority(A) = Priority(B)}\text{, A \& B run in Round Robin}$
+
+**how the scheduler sets priorities?**
+-> varies the priority of a job based on its *observed behavior*
+
+만약 어떤 작업이:
+1. 계속 CPU 사용을 포기하고 입력을 기다린다면? 우선순위를 높여서 응답 속도를 높인다
+2. 오랜 시간 집중적으로 CPU를 사용한다면? 우선순위를 낮춘다
+
+### Attempt #1: How To Change Priority
+
+> Rule 3:  
+> When a job enters the system, it is placed at the highest priority
+>
+>  
+> Rule 4a:  
+> If a job uses up an entire time slice while running, its priority is reduced  
+>
+>
+> Rule 4b:  
+> If a job gives up the CPU before the time slice is up, it stays at the same priority level
+
+#### Example 1: A Single Long-Running Job
+
+```mermaid
+gantt
+    dateFormat SS
+    axisFormat %L
+    title Simple scheduling
+    section Priority
+    Queue2: q2, 00, 10ms
+    Queue1: q1, after q2, 10ms
+    Queue0: q0, after q1, 180ms
+```
+
+시간 할당량이 10ms일 때 작업이 해당 시간 할당량 안에 끝나지 않는 경우, 우선순위가 Queue2 -> Queue1 -> Queue0 순서로 점차 낮아진다.
+
+#### Example 2: Along Came A Short Job
+
+```mermaid
+gantt
+    dateFormat SS
+    axisFormat %L
+    title Along Came An Interactive Job
+    section Priority
+    B arrival: b_arrival, 10, 10ms
+    Queue2: q2, 00, 10ms
+    B in Queue2: b_q2, after b_arrival, 10ms
+    Queue1: q1, after q2, 10ms
+    Queue0: q0_1, after q1, 80ms
+    Queue0: q0_2, after b_q2, 120ms
+```
+
+#### Example 3: What About I/O?
+
+만약 iterfactive 작업이 자주 발생한다면? 1ms 정도만 CPU를 필요로 하는 경우, *Rule 4b* 규칙에 따라 이 작업은 항상 가장 높은 우선순위의 큐에 위치하게 된다.
+
+#### Problems With Our Current MLFQ
+
+1. **starvation**
+    - too many interactive jobs -> consume all CPU time
+    - long running jobs will never receive CPU time(starve)
+2. game the scheduler
+    - sneaky to trick the scheduler into giving you more than your fair share of the resource.
+    - 시간 할당량 지나기 전에 I/O 작업 요청하고 CPU 양도 -> 계속 높은 우선순위의 큐에 남아있을 수 있다
+3. program may change its behavior over time
+    - long running job -> interactive job
+
+### Attempt #2: The Priority Boost
+
+> Rule 5:  
+> After some time period *S*, move all the jobs in the system to the topmost queue.
+
+두 개의 문제 해결 가능
+~~1. **starvation**~~
+~~3. program may change its behavior over time~~
+
+```text
+// w/o Priority Boost
+Q2  A                   B   C   B   C   B   C
+
+Q1      A
+
+Q0          A   A   A  -starvation-
+    10  20          100
+```
+
+```text
+// w/ Priority Boost per `S`(e.g 50ms)
+Q2  A                   B   C   A   B   C   A   B   C   A
+                                ^           ^           ^
+Q1      A
+
+Q0          A   A   A  
+    10  20          100
+```
+
+Q: **what should S be set to?** voo-doo constants
+너무 길면 long running job은 기아 상태에 빠지고, 너무 짧으면 interactive 작업이 CPU를 적절하게 사용할 수 없게 된다
+
+### Attempt #3: Better Accounting
+
+> ~~Rule 4a:  
+> If a job uses up an entire time slice while running, its priority is reduced~~  
+> ~~Rule 4b:  
+> If a job gives up the CPU before the time slice is up, it stays at the same priority level~~
+
+```text
+// w/o Gaming Tolerance
+Q2  A        BBBBBBB BBBBBBB BBBBBBB
+
+Q1      A           
+
+Q0          A       A       A
+```
+
+각 프로세스가 해당 우선순위 레벨에서 어느 정도의 시간 할당량을 사용했는지 잊는 대신, 스케쥴러는 이를 계속 추적한다. 어떤 프로세스가 일단 그 할당량을 사용했다면, 다음 우선 순위 큐로 강등(demote)시킨다
+
+> Rule 4:  
+> Once a job uses up its time allotment at a given level, ts priority is reduced
+
+```text
+// w/ Gaming Tolerance
+Q2  A           B
+
+Q1      A         B
+
+Q0          A       A   B   A   B   A   B
+```
+
+### Tuning MLFQ And Other Issues
+
+1. **parameterize**
+    - how many **queues** should there be?
+    - How big should the **time slice** be per queue
+    - How often should **priority be boosted**
+
+어떤 시스템은 우선순위 설정하는 데 도움을 주기도 한다. `nice` 라는 CLI 사용하면 작업의 우선순위를 높이거나 낮출 수 있다.
+
+## 요약
+
+> Rule 1:  
+> $\text{if }{Priority(A) \gt Priority(B)}\text{, then run A}$  
+>
+>
+> Rule 2:  
+> $\text{if }{Priority(A) = Priority(B)}\text{, A \& B run in Round Robin}$  
+>
+>
+> Rule 3:  
+> When a job enters the system, it is placed at the highest priority
+>
+>
+> Rule 4:  
+> Once a job uses up its time allotment at a given level, ts priority is reduced  
+>
+>
+> Rule 5:  
+> After some time period *S*, move all the jobs in the system to the topmost queue.
+
+- 규칙 4a, 4b는 gaming the scheduler 막기 위해 프로세스의 할당량을 추적하고, 할당량을 다 사용했다면 우선 순위를 낮추도로록 규칙을 변경한다
+- interactive 작업만 여럿 생길 경우 길게 이뤄지는 작업이 기아 상태에 빠질 수 있으므로, priority boost를 준다
