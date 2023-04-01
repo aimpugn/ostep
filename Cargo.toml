@@ -17,3 +17,5 @@ version="0.26.2"
 [dependencies.libc]
 version="0.2"
 
+[dependencies.rand]
+version="0.8.5"

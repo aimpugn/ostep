@@ -12,7 +12,7 @@ use util::args::{ArgsMap, Config};
 
 fn main() {
     let _args = Config.parse();
-    process()
+    lottery()
 }
 
 fn introduction() {
@@ -44,4 +44,8 @@ fn process_run() {
     };
     s.init();
     s.run();
+}
+
+fn lottery() {
+    process::lottery::simple_lottery_scheduling();
 }

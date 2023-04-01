@@ -46,7 +46,21 @@
         - [Attempt #2: The Priority Boost](#attempt-2-the-priority-boost)
         - [Attempt #3: Better Accounting](#attempt-3-better-accounting)
         - [Tuning MLFQ And Other Issues](#tuning-mlfq-and-other-issues)
-    - [요약](#요약)
+        - [요약](#요약)
+    - [Scheduling: Proportional Share(Lottery Scheduling)](#scheduling-proportional-sharelottery-scheduling)
+        - [9.1 Basic Concept: Tickets Represent Your Share](#91-basic-concept-tickets-represent-your-share)
+        - [9.2 Ticket Mechanisms](#92-ticket-mechanisms)
+        - [9.3 Implementation](#93-implementation)
+        - [9.4 An Example](#94-an-example)
+        - [9.5 How To Assign Tickets?](#95-how-to-assign-tickets)
+        - [9.6 Stride Scheduling](#96-stride-scheduling)
+        - [9.7 The Linux `Completely Fair Scheduler` (`CFS`)](#97-the-linux-completely-fair-scheduler-cfs)
+            - [Basic Operation](#basic-operation)
+            - [Weighting (Niceness)](#weighting-niceness)
+                - [time slice 계산](#time-slice-계산)
+                - [`vruntime` 계산](#vruntime-계산)
+            - [Using Red-Black Trees](#using-red-black-trees)
+            - [Dealing With I/O And Sleeping Processes](#dealing-with-io-and-sleeping-processes)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -947,7 +961,7 @@ Q0          A       A   B   A   B   A   B
 
 어떤 시스템은 우선순위 설정하는 데 도움을 주기도 한다. `nice` 라는 CLI 사용하면 작업의 우선순위를 높이거나 낮출 수 있다.
 
-## 요약
+### 요약
 
 > Rule 1:  
 > $\text{if }{Priority(A) \gt Priority(B)}\text{, then run A}$  
@@ -970,3 +984,237 @@ Q0          A       A   B   A   B   A   B
 
 - 규칙 4a, 4b는 gaming the scheduler 막기 위해 프로세스의 할당량을 추적하고, 할당량을 다 사용했다면 우선 순위를 낮추도로록 규칙을 변경한다
 - interactive 작업만 여럿 생길 경우 길게 이뤄지는 작업이 기아 상태에 빠질 수 있으므로, priority boost를 준다
+
+## Scheduling: Proportional Share(Lottery Scheduling)
+
+### 9.1 Basic Concept: Tickets Represent Your Share
+
+> `ticket`은 프로세스가 받아야 하는 자원의 공유를 나타는 데 사용
+
+- 가령 `A`가 75 티켓, `B`가 25 티켓이면, 각각 75%, 25%의 CPU를 받게 된다
+- 수시로 추첨(by holding a lottery every so often)을 통해 스케쥴링
+    - 즉, 매 `time slice`마다
+- 장점
+    - LRU에서 순환하는 순차 워크로드 경우 최악의 퍼포먼스가 나올 수 있는데 이런 최악의 경우가 없다는 점
+    - 모든 프로세스 자원 할당 히스토리를 트래킹하는 것보다 더 적은 상태 추적이 필요하기에 경량이라는 점
+    - 난수 생성이 꽤 빠르다는 점
+
+### 9.2 Ticket Mechanisms
+
+> `ticket currency`(티켓 통화)는 사용자가 티켓을 자체적인 통화(currency)로 할당할 수 있도록 해준다. 이 각자의 통화(currency)로 할당된 티켓은 시스템에 의해 올바른 전역 값(correct global value)로 변환된다
+
+- 가령 사용자 `A`와 `B`가 각각 100개의 티켓을 받고, `A`는 `A`의 통화(currency)로 두 개의 `A1`(500), `A2`(500) 작업 실행하고, `B`는 `B1`(10)이라는 하나의 작업 실행할 경우
+    - 시스템은 `A`의 통화로 각 500 티켓을 가진 `A1`과 `A2`의 할당량을 전역 통화(global currency)의 50 티켓으로 변환한다
+    - 비슷하게 `B1`의 10 티켓은 100 타켓으로 변환한다
+
+> `ticket transfer`(티켓 양도)는 프로세스가 잠시 티켓을 다른 프로세스에 넘기는 것을 의미한다.
+
+- 클라이언트의 속도를 높이기 위해 클라이언트를 위해 서버가 일하도록 서버로 메시지를 보내는 클라이언트/서버 설정 경우 유용하다
+
+> `ticket inflation`로 프로세스가 가진 티켓의 수를 늘리거나 줄일 수 있다.
+
+- 프로세스가 서로 신뢰할 수 없는 경우
+    - 하나의 탐욕적인 프로세스가 자신에게 엄청난 양의 티켓을 주고 머신을 점유할 수 있기 때문에 인플레이션이 의미가 없다.
+- 프로세스가 서로 신뢰할 수 있는 그룹인 경우
+    - 어떤 프로세스가 CPU가 더 필요하다는 것을 알면, 다른 프로세스와의 커뮤니케이션 없이 그 필요를 시스템에 반영하기 위해 티켓을 부스트할 수 있다.
+
+### 9.3 Implementation
+
+- 구현에 필요한 사항
+    1. 당첨 티켓을 고르기 위한 좋은 난수 생성기
+    2. 시스템의 프로세스 트래킹하기 위한 자료 구조(가령 list)
+    3. 전체 티켓 수
+
+[src/chapters/process/lottery.rs](../src/chapters/process/lottery.rs) 참고
+
+### 9.4 An Example
+
+- 같은 수의 티켓과 같은 런타임(`R`)을 갖는 경우
+- lottery 스케쥴링 때문에 한 작업이 다른 작업 전에 끝날 수 있는데, 이 차이를 정량화 하기 위해 간단한 `fairness metric`(`F`) 정의
+    - $F = {\text{the time 1st job completed}\over\text{the time 2nd job completed}}$
+    - $R = 10$, 첫번째 작업이 10에 종료, 두번째 작업이 20에 종료
+    - $F = {10 \over 20} = 0.5$
+    - 두 작업이 거의 동시에 끝날수록, `F` 값은 1에 가까워지고, 그 값이 1이면 완벽하게 공정함을 의미
+- 작업 길이가 매우 길지 않은 경우, 평균적인 공정성은 상당히 낮을 수 있다. 작업이 상당한 time slice 동안 실행되어야 원하는 만큼의 공정성 결과에 도달하게 된다.
+
+### 9.5 How To Assign Tickets?
+
+- One approach is to assume that the users know best -> BUT it really doesn’t tell you what to do
+- 그래서 티켓 할당 문제는 여전히 남아 있다.
+
+### 9.6 Stride Scheduling
+
+- 무작위 스케쥴러는 대략적으로 올바른 스케쥴러를 제공하지만, 특히 짭은 시간 단위에서는 정확하게 옳은 비율(proportions)을 전달하지 못할 수 있다
+- Each job in the system has a **`stride`**
+    - 티켓 수에 반비례(inverse in proportion to the number of tickets)하여 계산된 값
+    - A: 100, B: 50, C: 250 경우
+        - 어떤 큰 수를 각 티켓으로 나눈다.
+        - 만약 그 큰 수가 10,000이라면, A's stride: 100, B's stride: 200, C's stride: 40 된다
+        - 이 100, 200, 40을 `stride`라 부른다
+- 프로세스가 실행될 때마다 `stride` 값만큼 프로세스에 대한 카운터(`pass counter`, `pass` 값이라 불린다)를 증가시켜서 global progress를 추적한다
+- `stride`와 `pass`를 사용해서 스케쥴러는 어떤 프로세스가 다음에 실행되어야 하는지 결정
+- 언제든지, `pass` 값이 가장 작은 프로세스를 선택
+
+```pseudocode
+curr = remove_min(queue); // pick client with min pass
+schedule(curr); // run for quantum
+curr->pass += curr->stride; // update pass using stride
+insert(queue, curr); // return curr to queue
+```
+
+- 간단한 시나리오
+    - A(tickets: 100, stride: 100, pass: 0), B(tickets: 50, stride: 200, pass: 0), C(tickets: 250, stride: 40, pass: 0)
+        - 임의로 A 실행 -> A(tickets: 100, stride: 100, pass: 100)
+        - B 실행 -> B(tickets: 50, stride: 200, pass: 200)
+        - C 실행 -> C(tickets: 250, stride: 40, pass: 40)
+        - C 실행 -> C(tickets: 250, stride: 40, pass: 80)
+        - C 실행 -> C(tickets: 250, stride: 40, pass: 120)
+        - A 실행 -> A(tickets: 100, stride: 100, pass: 200)
+        - C 실행 -> C(tickets: 250, stride: 40, pass: 160)
+        - C 실행 -> C(tickets: 250, stride: 40, pass: 200)
+    - C 5번 실행, A 두 번 실행, B 한 번 실행
+
+> `Lottery scheduling` achieves the proportions probabilistically over time;
+>
+> `Stride scheduling` achieves the proportions probabilistically right at the end of each scheduling cycle.
+
+그렇다면 왜 `Lottery scheduling` 사용? `Stride scheduling`와 달리 전역 상태(global state)가 없기 때문. 만약 `Stride scheduling`에서 새로운 프로세스가 진입하면, 이 프로세스의 `pass` 카운터는 0이 되어야 할까? 만약 그렇다면 CPU를 독점할 수 있다. `Lottery scheduling`은 프로세스마다 글로벌 상태가 없으므로 해당 프로세스가 얼만큼 티켓을 갖고 있든 새로운 프로세스를 간단하게 추가할 수 있고, 얼마나 많은 전체 티켓을 가졌는지 추적하기 위해 단일 글로벌 변수를 업데이트하면 된다. 그리고 그 다음부터는 그대로 진행하면 된다.
+
+### 9.7 The Linux `Completely Fair Scheduler` (`CFS`)
+
+- 특징
+    - a highly efficient and scalable
+    - it aims to spend very little time making scheduling decisions(even after aggressive optimization, scheduling uses about 5% of overall datacenter CPU time in a study of Google datacenters, Kanev et al)
+
+#### Basic Operation
+
+목표
+- 모든 경쟁하는 프로세스들에 고르게 CPU를 공정하게 분배
+
+virtual runtime (`vruntime`), counting-based technique
+- 각 프로세스 실행마다 `vruntime`를 누적시킨다. 대부분의 경우 각 프로세스의 `vruntime`은 physical (real) time에 비례하여 같은 비율로 증가
+- `CFS`는 가장 낮은 `vruntime`의 프로세스를 선택
+
+`CFS`의 tension
+    - `CFS`가 자주 스위칭 -> 공정성 증가 -> 퍼포먼스 하락
+    - `CFS`가 덜 스위칭 -> 단기(near-term) 공정성 하락 -> 퍼포먼스 증가
+
+`CFS`는 이런 텐션을 여러 제어 파라미터로 관리
+- `sched_latency`
+    - 어떤 프로세스가 스위칭 되기 전에 얼마나 실행되어야 하는지 결정.
+    - 보통 48 milliseconds.
+    - `CFS`는 이 값을 프로세스 개수 n으로 나눠서 프로세스에 대한 time slice 결정.
+    - 프로세스가 종료한다면, 프로세스에 대한 time slice는 다시 계산
+- `min_granularity`
+    - 최소한 보장되는 프로세스 실행 시간. 프로세스가 너무 많은 경우 잦은 스위칭 발생 대비.
+    - 일반적으로 6ms
+
+#### Weighting (Niceness)
+
+`nice` level of a process
+- 기본값 0, -20 ~ +19 사이의 값으로 설정 가능
+- 양수는 낮은 우선순위, 음수는 높은 우선순위
+
+`CFS`는 각 프로세스의 `nice` 값을 `weight`와 맵핑
+
+```c
+static const int prio_to_weight[40] = {
+    // preserves CPU proportionality ratios when the difference in `nice` values is constant.
+    // 즉, `A`가 -5, `B`가 0(차이가 5)이거나 `A`가 5, `B`가 10(차이가 5)일 때 모두
+    // CPU 비례 비율이 일정하다
+    // - 3121/1024 = 3.0478515625
+    // - 1025/335 = 3.056716417910448
+    // - 335/110 = 3.045454545454545
+
+    /* -20 */ 88761, 71755, 56483, 46273, 36291,
+    /* -15 */ 29154, 23254, 18705, 14949, 11916,
+    /* -10 */ 9548, 7620, 6100, 4904, 3906,
+    /* -5 */ 3121, 2501, 1991, 1586, 1277,
+    /* 0 */ 1024, 820, 655, 526, 423,
+    /* 5 */ 335, 272, 215, 172, 137,
+    /* 10 */ 110, 87, 70, 56, 45,
+    /* 15 */ 36, 29, 23, 18, 15,
+};
+```
+
+##### time slice 계산
+
+n 개의 프로세스가 있을 때, 우선순위를 고려하여 time slice 계산
+
+$$\text{time\_slice}_{k} = {\text{weight}_{k}\over\sum_{i=0}^{n-1}\text{weight}_{i} \times \text{sched\_latency}}$$
+
+예를 들면, 다음과 같이 된다
+- `A`
+    - 프로세스는 중요해서 우선순위를 높인다(nice: -5)
+    - $weight_{A}$는 위 테이블의 `3121`임을 의미
+- `B`
+    - 프로세스는 중요치 않아서 기본 우선순위 유지(nice: 0)
+    - $weight_{B}$는 위 테이블의 `1024`임을 의미
+
+이를 계산하면, 두개의 프로세스 가정하고 있으므로, 분모는 4145가 되므로
+
+$$
+{3121\over\sum_{i=0}^{n-1}\text{weight}_{i}}={3121\over4145}\approx{0.75}
+$$
+
+`A` 프로세스의 time slice는 `sched_latency`(48ms)의 3/4, 36ms가 된다
+`B` 프로세스의 time slice는 반대로 1/4, 12ms가 된다
+
+##### `vruntime` 계산
+
+time slice 계산을 일반화하는 것 외에도, `CFS`가 `vruntime`을 계산하는 방식도 반드시 조정해야 한다.
+
+$$\text{vruntime}_{i} = {\text{vruntime}_{i} + {\text{weight}_{0}\over\text{weight}_{i}}\times\text{runtime}_{i}}$$
+
+기본 우선순위(${\text{weight}_{0}=1024}$)를 해당 프로세스의 $\text{weight}_{i}$로 나눠서 실제 실행 시간 $\text{runtime}_{i}$에 곱하여,우선순위가 높을수록 마치 짧게 실행된 것처럼 만든다.
+
+따라서 위의 예제에서 `A` 프로세스는 `B` 프로세스보다 1/3의 비율로 `vruntime`을 누적시키게 된다.
+
+#### Using Red-Black Trees
+
+- 다음 프로세스를 가능한 한 빨리 찾아야 하므로, 단순 리스트로는 확장되지 않는다.
+- `CFS`는 `red-black tree`에 프로세스 유지
+    - balanced tree의 일종
+    - binary tree와 달리, 추가적인 작업을 통해 낮은 깊이를 유지
+    - 로그 시간(logarithmic time) 내에 작업 수행 보장
+- 모든 프로세스를 유지하는 것은 아니다
+    - 실행중이거나 실행할 수 있는 프로세스만 유지
+    - I/O 기다리거나, 네트워크 패킷 도착을 기다리기 위해 sleep 상태에 들어가면 트리에서 제거하고 다른 곳에서 추적
+
+10개의 `vruntime`: 1, 5, 9, 10, 14, 18, 17, 21, 22, 24
+
+```mermaid
+stateDiagram-v2
+    classDef BlackNode font-weight:bold,stroke-width:2px,stroke:black
+    classDef RedNode font-weight:bold,stroke-width:2px,stroke:red
+
+    14 --> 9
+    9 --> 1
+    1 --> 5
+    9 --> 10
+    14 --> 18
+    18 --> 17
+    18 --> 22
+    22 --> 21
+    22 --> 24
+
+   class 14 BlackNode
+   class 9 RedNode
+   class 1 BlackNode
+   class 5 RedNode
+   class 10 BlackNode
+   class 18 RedNode
+   class 17 BlackNode
+   class 22 BlackNode
+   class 21 RedNode
+   class 24 RedNode
+```
+
+같은 값들을 리스트가 아닌 red-black tree에 유지하면 대부분의 작업이 더 효율적이게 된다
+프로세스가 `vruntime`에 따라 정렬(작은 값은 좌측, 큰 값은 우측)되고, 대부분의 작업이 로그 시간 $O(\log{n})$ 내에 수행된다.
+
+#### Dealing With I/O And Sleeping Processes
+
+오랜 시간 동안, 가령 10초 정도 sleep 상태에 빠져있던 프로세스가 깨어난다면, 그 다음 10초 동안 CPU를 독점하게 되고, 다른 프로세스는 기아 상태에 빠지게 된다. 이 경우 `CFS`는 해당 프로세스가 깨어날 때 `vruntime`를 변경함으로써 이런 문제를 처리한다. `CFS`는 레드 블랙 트리 상의 가장 작은 값을 찾아서 해당 프로세스의 `vruntime`로 설정한다.
+
+기아 상태를 피할 수 있지만, 비용이 들지 않는 것은 아니다. 짧은 시간 동안 잠드는 작업들은 종종 CPU의 공평한 몫(fair share)을 받을 수 없게 된다.
