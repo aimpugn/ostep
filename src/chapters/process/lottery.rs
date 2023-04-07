@@ -1,8 +1,10 @@
+use nix::unistd::Whence;
 // https://docs.rs/rand/latest/rand/
 // https://github.com/rust-random/rand
 use rand::Rng;
 use std::borrow::Borrow;
 use std::cell::{Ref, RefCell, RefMut};
+use std::ops::Deref;
 use std::rc::Rc;
 
 pub fn simple_lottery_scheduling() {
@@ -61,4 +63,19 @@ impl Process {
             next: None,
         }
     }
+}
+
+fn process_pop() -> i32 {
+    let mut head = Process::new(0);
+    let value = head.tickets;
+    match Rc::try_unwrap(head.next.unwrap()) {
+        Ok(refcell) => {
+            head = refcell.into_inner();
+        }
+        Err(err) => {
+            println!("error!")
+        }
+    }
+
+    return value;
 }

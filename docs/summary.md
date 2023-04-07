@@ -61,6 +61,9 @@
                 - [`vruntime` 계산](#vruntime-계산)
             - [Using Red-Black Trees](#using-red-black-trees)
             - [Dealing With I/O And Sleeping Processes](#dealing-with-io-and-sleeping-processes)
+    - [Multiprocessor Scheduling (Advanced)](#multiprocessor-scheduling-advanced)
+        - [10.1 Background: Multiprocessor Architecture](#101-background-multiprocessor-architecture)
+        - [10.2 Don’t Forget Synchronization](#102-dont-forget-synchronization)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -308,8 +311,7 @@ Ok(NixParent { child, .. }) => {
 
 ### `exec()`
 
-프로그램에서 다른 프로그램을 실행할 때 사용
-`execvp()`은 코드(그리고 정적 데이터)를 그 실행할 수 프로그램에서 **로드**(load)해서 현재 코드 segment(와 현재 정적 데이터)를 덮어쓴다. 프로그램의 heap과 stack, 그리고 다른 메모리 공간들은 다시 초기화 된다. 그리고 OS는 그 프로그램을 실행시키고, 그 프로세스의 `argv`로 인자들을 넘긴다.
+프로그램에서 다른 프로그램을 실행할 때 사용.
 
 ```rs
 let words = execvp(
@@ -325,7 +327,15 @@ let words = execvp(
 );
 ```
 
-따라서 새로운 프로세스를 생성하는 것이 아니라, 그보다는 현재 실행중인 프로그램을 다른 실행중인 프로그램(`wc`)로 변환한다.
+아래와 같은 일이 이뤄진다
+1. `fork()`로 생성된 자식 프로세스 생성
+    - 이 포크 된 자식 프로세스는 부모 프로세스의 메모리 공간의 복사본을 갖는다
+    - 이때 부모 프로세스의 복사본으로 초기화(initialized)
+2. 실행 프로그램 `wc`와 인자들(가령 `-cl`, `Cargo.toml` 파일 경로 등)을 받는다
+3. 실행 프로그램 `wc`의 코드와 정적 데이터를 로드하여 현재 코드의 세그먼트와 정적 데이터에 덮어쓴다
+    - 이때 heap, stack, 기타 메모리 공간이 *다시* 초기화(re-initialize)된다
+
+따라서 새로운 프로세스를 생성하는 것이 아니라, 그보다는 *현재 실행중*인 프로그램(예제에서 p3)을 다른 실행중인 프로그램(`wc`)로 변환한다.
 자식 프로세스에서 `exec()`이 실행된 후에는 마치 부모 프로세스가 실행되지 않은 것과 같다. `exec()` 함수 호출이 성공하면 리턴하지 않기 때문이다.
 
 ### API 동기부여
@@ -1218,3 +1228,71 @@ stateDiagram-v2
 오랜 시간 동안, 가령 10초 정도 sleep 상태에 빠져있던 프로세스가 깨어난다면, 그 다음 10초 동안 CPU를 독점하게 되고, 다른 프로세스는 기아 상태에 빠지게 된다. 이 경우 `CFS`는 해당 프로세스가 깨어날 때 `vruntime`를 변경함으로써 이런 문제를 처리한다. `CFS`는 레드 블랙 트리 상의 가장 작은 값을 찾아서 해당 프로세스의 `vruntime`로 설정한다.
 
 기아 상태를 피할 수 있지만, 비용이 들지 않는 것은 아니다. 짧은 시간 동안 잠드는 작업들은 종종 CPU의 공평한 몫(fair share)을 받을 수 없게 된다.
+
+## Multiprocessor Scheduling (Advanced)
+
+> TODO: 우선 읽기만 하고, 정리는 나중에...
+
+- `multiprocessor`
+    - `multicore` processor
+    - `multicore`? multiple CPU cores are packed onto a single chip
+    - 단일 CPU를 너무 많은 전력을 소모하지 않으면서 더 빠르게 만들기 어려워졌을 때 유명해지기 시작
+
+문제는, 일반적인 애플리케이션은 단일 CPU 사용해서, CPU를 추가한다고 애플리케이션이 더 빨라지는 건 아니었다.
+이를 해결하기 위해서는 `threads` 사용하여 병렬(`parallel`)로 실행되도록 애플리케이션 재작성이 필요
+
+multi threaded 애플리케이션은 작업을 여러 CPU에 분산시킬 수 있고, CPU 자원이 추가되면 더 빠르게 실행될 수 있다.
+
+그러면 OS에 대해 생기는 문제가 multiprocessor scheduling이다
+
+### 10.1 Background: Multiprocessor Architecture
+
+단일 CPU 하드웨어와 멀티 CPU 하드웨어의 근본적인 차이점은 하드웨어 **캐시**의 사용과 멀티 프로세서 간의 데이터 공유가 어떻게 이뤄지는가에 있다.
+
+캐시는 지역성(locality)이 기반한다
+- 시간 지역성(temporal locality)
+- 공간 지역성(spatial locality)
+
+여러 CPU와 단일 공유 메인 메모리 경우 캐시 일관성(cache coherence) 문제 발생
+1. CPU1이 A 주소에서 데이터 D를 읽으려 함
+2. D가 캐시에 없어서 시스템은 메인 메모리에서 가져온다
+3. 캐시 A 주소의 값을 D'로 수정. 메인 메모리까지 수정하는 건 느리기 때문에 시스템은 이를 나중에 수정
+4. OS가 프로그램 실행을 멈추고 CPU2로 이동시킨다
+5. A 주소에서 데이터 D를 읽으려 하지만 캐시에 없어서 메인 메모리에서 D' 대신 D를 가져온다 -> 문제 발생
+
+기본적인 해결책은 하드웨어가 제공. 메모리 접근을 모니터링해서 옳은 일이 일어나는 것을 보장하고 단일 공유 메모리 view가 보존되도록 보장
+
+버스 시스템에서 이를 위한 한 방법은 **bus snooping**이라는 오래된 테크닉 사용하는 것
+1. 각 캐시의 cache controller는 메인 메모리에 연결된 bus를 관찰하며 메모리 업데이트를 주시
+2. CPU가 캐시에 유지하고 있는 데이터 항목에 대한 수정을 확인하면, 변경 사항을 알리고, 캐시를 무효화시키거나 업데이트한다
+
+Write-back caches는 보다 더 복잡한 작업이 이뤄지지만, 기본적인 작동은 위와 같다
+
+### 10.2 Don’t Forget Synchronization
+
+여러 CPU를 통해 공유 데이터 항목 또는 구조에 접근할 때,
+1. 락(lock) 같은 mutual exclusion primitives 사용하여 정확성을 보장
+2. 또는 lock-free 자료 구조를 구현
+
+```rs
+// rustlib/src/rust/library/alloc/src/collections/linked_list.rs
+/// Removes and returns the node at the back of the list.
+#[inline]
+fn pop_back_node(&mut self) -> Option<Box<Node<T>>> {
+    // This method takes care not to create mutable references to whole nodes,
+    // to maintain validity of aliasing pointers into `element`.
+    self.tail.map(|node| unsafe {
+        let node = Box::from_raw(node.as_ptr());
+        self.tail = node.prev;
+
+        match self.tail {
+            None => self.head = None,
+            // Not creating new mutable (unique!) references overlapping `element`.
+            Some(tail) => (*tail.as_ptr()).next = None,
+        }
+
+        self.len -= 1;
+        node
+    })
+}
+```
