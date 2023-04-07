@@ -296,6 +296,10 @@ Unix 시스템은 프로세스 생성 위해 `fork()`와 `exec()`이라는 시�
 
 ### `fork()`
 
+- OS provides `fork()` as a way to create a new process
+- the newly created process, child, is *almost exact copy of the calling process*, but isn’t an exact copy because it now has its own copy of the address space
+- the child doesn’t start running at `main()`
+
 ### `wait()`
 
 부모 프로세스와 자식 프로세스 중 무엇이 먼저 실행될지는 모르지만, `wait()` 시스템 콜을 사용해서
@@ -311,7 +315,7 @@ Ok(NixParent { child, .. }) => {
 
 ### `exec()`
 
-프로그램에서 다른 프로그램을 실행할 때 사용.
+프로그램에서 다른 프로그램을 실행할 때 사용.
 
 ```rs
 let words = execvp(
@@ -414,16 +418,16 @@ CPU 가상화는 각 프로세스를 잠깐씩 실행하는 `time sharing`을 �
 
 ### Problem #1: Restricted Operations
 
-- `user mode`: 프로세스가 원하는대로 모든 자원을 사용하지 못하도록 제한하는 processor mode
+- `user mode`: 프로세스가 원하는대로 모든 자원을 사용하지 못하도록 제한하는 processor mode
 - `kernal mode`: OS가 실행되는 모드로, 모든 제한된 명령을 실행할 수 있다
 
 만약 유저 모드의 프로그램이 권한이 필요한 작업을 수행하길 원한다면? 요즘의 모든 하드웨어는 가상적으로(virtually) system call을 요청할 수 있도록 하고 있다
 
-user mode process
--> `trap` instruction
--> jump into kernal
--> kernal mode
--> `return-from-trap` call by OS
+user mode process  
+-> `trap` instruction  
+-> jump into kernal  
+-> kernal mode  
+-> `return-from-trap` call by OS  
 
 On x86
 1. The processor will push the program counter, flags, and a few other registers onto a per-process `kernel stack`
@@ -489,7 +493,8 @@ How does the `trap` know which code to run inside the OS?
 
 어떤 식으로든 OS가 프로세스 스위칭을 결정하면, OS는 `context switch`라는 저수준의 코드 조각을 실행
 
-// TODO: 나중에 다시 보기
+> TODO: 나중에 다시 보기
+
 1. At boot
     1. [OS]
         1. [OS] initialize trap table
@@ -763,7 +768,7 @@ gantt
 
 가령 시간 할당량 10ms에 context switching 비용이 1ms라면, 10%의 시간이 컨텍스트 스위칭에 사용되고 낭비된다. 이를 분산하기 위해 만약 시간 할당량을 100ms로 늘린다면, 1%의 시간이 컨텍스트 스위칭에 사용되고 시간 할당량의 비용이 분산된다.
 
-시간 할당량이 1s이고, 실행 시간이 각 5초인 A, B, C 세 프로그램이 RR로 스케쥴링될 때,
+시간 할당량이 1s이고, 실행 시간이 각 5초인 A, B, C 세 프로그램이 RR로 스케쥴링될 때,
 A는 13초, B는 14초, C는 15초에 끝나고, 평균 14초가 소요되는데, 처리량 지표에서는 상당히 좋지 않다.
 
 만약 FIFO라면, 각각 5초, 10초, 15초에 끝나고, ${5 + 10 + 15 \over 3} = 10$ 초가 된다.
@@ -992,8 +997,8 @@ Q0          A       A   B   A   B   A   B
 > Rule 5:  
 > After some time period *S*, move all the jobs in the system to the topmost queue.
 
-- 규칙 4a, 4b는 gaming the scheduler 막기 위해 프로세스의 할당량을 추적하고, 할당량을 다 사용했다면 우선 순위를 낮추도로록 규칙을 변경한다
-- interactive 작업만 여럿 생길 경우 길게 이뤄지는 작업이 기아 상태에 빠질 수 있으므로, priority boost를 준다
+- 규칙 4a, 4b는 gaming the scheduler 막기 위해 프로세스의  할당량을 추적하고, 할당량을 다 사용했다면 우선 순위를 낮추도로록 규칙을 변경한다
+- interactive 작업만 여럿 생길 경우 길게 이뤄지는 작업이 기아 상태에 빠질 수 있으므로, priority boost를 준다
 
 ## Scheduling: Proportional Share(Lottery Scheduling)
 
@@ -1151,7 +1156,7 @@ static const int prio_to_weight[40] = {
 
 n 개의 프로세스가 있을 때, 우선순위를 고려하여 time slice 계산
 
-$$\text{time\_slice}_{k} = {\text{weight}_{k}\over\sum_{i=0}^{n-1}\text{weight}_{i} \times \text{sched\_latency}}$$
+$$\text{timeSlice}_{k} = {\text{weight}_{k}\over\sum_{i=0}^{n-1}\text{weight}_{i} \times \text{schedLatency}}$$
 
 예를 들면, 다음과 같이 된다
 - `A`
@@ -1225,7 +1230,7 @@ stateDiagram-v2
 
 #### Dealing With I/O And Sleeping Processes
 
-오랜 시간 동안, 가령 10초 정도 sleep 상태에 빠져있던 프로세스가 깨어난다면, 그 다음 10초 동안 CPU를 독점하게 되고, 다른 프로세스는 기아 상태에 빠지게 된다. 이 경우 `CFS`는 해당 프로세스가 깨어날 때 `vruntime`를 변경함으로써 이런 문제를 처리한다. `CFS`는 레드 블랙 트리 상의 가장 작은 값을 찾아서 해당 프로세스의 `vruntime`로 설정한다.
+오랜 시간 동안, 가령 10초 정도 sleep 상태에 빠져있던 프로세스가 깨어난다면, 그 다음 10초 동안 CPU를 독점하게 되고, 다른 프로세스는 기아 상태에 빠지게 된다. 이 경우 `CFS`는 해당 프로세스가 깨어날 때 `vruntime`를 변경함으로써 이런 문제를 처리한다. `CFS`는 레드 블랙 트리 상의 가장 작은 값을 찾아서 해당 프로세스의 `vruntime`로 설정한다.
 
 기아 상태를 피할 수 있지만, 비용이 들지 않는 것은 아니다. 짧은 시간 동안 잠드는 작업들은 종종 CPU의 공평한 몫(fair share)을 받을 수 없게 된다.
 
@@ -1270,7 +1275,7 @@ Write-back caches는 보다 더 복잡한 작업이 이뤄지지만, 기본적�
 
 ### 10.2 Don’t Forget Synchronization
 
-여러 CPU를 통해 공유 데이터 항목 또는 구조에 접근할 때,
+여러 CPU를 통해 공유 데이터 항목 또는 구조에 접근할 때,
 1. 락(lock) 같은 mutual exclusion primitives 사용하여 정확성을 보장
 2. 또는 lock-free 자료 구조를 구현
 
