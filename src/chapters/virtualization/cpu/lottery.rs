@@ -66,14 +66,14 @@ impl Process {
 }
 
 fn process_pop() -> i32 {
-    let mut head = Process::new(0);
-    let value = head.tickets;
-    match Rc::try_unwrap(head.next.unwrap()) {
+    let mut _head = Process::new(0);
+    let value = _head.tickets;
+    match Rc::try_unwrap(_head.next.unwrap()) {
         Ok(refcell) => {
-            head = refcell.into_inner();
+            _head = refcell.into_inner();
         }
-        Err(err) => {
-            println!("error!")
+        Err(_err) => {
+            println!("error when RC::try_unwrap");
         }
     }
 

@@ -64,6 +64,29 @@
     - [Multiprocessor Scheduling (Advanced)](#multiprocessor-scheduling-advanced)
         - [10.1 Background: Multiprocessor Architecture](#101-background-multiprocessor-architecture)
         - [10.2 Don’t Forget Synchronization](#102-dont-forget-synchronization)
+    - [The Abstraction: Address Spaces](#the-abstraction-address-spaces)
+        - [13.1 Early Systems](#131-early-systems)
+        - [13.2 Multiprogramming and Time Sharing](#132-multiprogramming-and-time-sharing)
+        - [13.3 The Address Space](#133-the-address-space)
+        - [13.4 Goals](#134-goals)
+    - [Interlude: Memory API](#interlude-memory-api)
+        - [14.1 Types of Memory](#141-types-of-memory)
+            - [stack](#stack)
+            - [heap](#heap)
+        - [14.2 The `malloc()` Call](#142-the-malloc-call)
+        - [The `free()` Call](#the-free-call)
+        - [14.4 Common Errors](#144-common-errors)
+            - [Forgetting To Allocate Memory](#forgetting-to-allocate-memory)
+            - [Not Allocating Enough Memory](#not-allocating-enough-memory)
+            - [Forgetting to Initialize Allocated Memory](#forgetting-to-initialize-allocated-memory)
+            - [Forgetting To Free Memory](#forgetting-to-free-memory)
+            - [Freeing Memory Before You Are Done With It](#freeing-memory-before-you-are-done-with-it)
+            - [Freeing Memory Repeatedly](#freeing-memory-repeatedly)
+            - [Calling `free()` Incorrectly](#calling-free-incorrectly)
+            - [요약](#요약-1)
+        - [14.5 Underlying OS Support](#145-underlying-os-support)
+        - [14.6 Other Calls](#146-other-calls)
+    - [Mechanism: Address Translation](#mechanism-address-translation)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -1301,3 +1324,184 @@ fn pop_back_node(&mut self) -> Option<Box<Node<T>>> {
     })
 }
 ```
+
+## The Abstraction: Address Spaces
+
+### 13.1 Early Systems
+
+- OS는 물리 메모리 주소 0부터 시작하는, 어떤 루틴의 집합(사실상 library)
+- 프로그램(프로세스)는 나머지 물리 메모리 사용
+
+### 13.2 Multiprogramming and Time Sharing
+
+- 머신이 비싸지면서 주어진 시간에 여러 프로세스가 실행할 준비가 되고, I/O 동안 다른 프로세스로 스위칭하는 `multiprogramming` 등장
+- 배치 컴퓨팅의 한계 때문에 `time sharing` 등장하고, `interactivity` 개념이 중요해짐
+- 여러 프로그램이 메모리에 동시에 상주헤가 되면서, `protection`이 중요해짐
+
+```text
+0KB     -- Start of physical memory -- 
+    OS(code, data, etc)
+64KB    
+//////// (free) ////////
+128KB   
+    Process C(code, data, etc)
+192KB   
+    Process B(code, data, etc)
+256KB   
+//////// (free) ////////
+320KB   
+    Process A(code, data, etc)
+384KB   
+//////// (free) ////////
+448KB   
+//////// (free) ////////
+512KB   -- End of physical memory -- 
+```
+
+### 13.3 The Address Space
+
+> `address space`?  
+> - easy to use abstraction of physical memory  
+> - the running program’s view of memory in the system  
+
+`address space`에는 무엇이 있어야 할까?
+- code: 명령(instruction)들
+- stack: 함수 호출 체인에서 어디에 있는지 추적, 지역 변수 할당, 루틴들에 파라미터 전달 값을 리턴
+- heap: C의 `malloc()`, java와 C++의 `new`로 인스턴스 생성 등 동적으로 할당되고 사용자가 관리하는 메모리를 위해 사용
+
+32비트 주소 공간 표현이 힘들고, 수식이 복잡해지므로 16비트 주소 공간으로 표현해보자면,
+
+```mermaid
+0KB |--------------------------------|
+    |          Program Code          |
+1KB |--------------------------------|
+    |              Heap              |
+2KB |--------------------------------|
+    |                ↓               |
+    |                                |
+    |             (free)             |
+    |                                |                 
+    |                ↑               |                 
+15KB|--------------------------------|
+    |              Stack             |
+16KB|--------------------------------|
+```
+
+- this placement of stack and heap is just a convention;
+    - you could arrange the address space in a different way if you’d like
+    - when multiple threads co-exist in an address space, no nice way to divide the address space like this works anymore
+- `virtualizing memory`(VM): the OS, in tandem with some hardware support, will have to make sure the load doesn’t actually go to physical address 0
+
+### 13.4 Goals
+
+- `transparency`(it means "one that is hard to notice")
+    - in a way that is invisible to the running program
+    - the program behaves as if it has its own private physical memory
+    - multiplex memory among many different jobs
+- `efficiency`
+    - time
+    - space
+- `protection`
+    - isolation
+
+> if you print out an address in a program, it’s a virtual one, an illusion of how things are laid out in memory; only the OS (and the hardware) knows the real truth.
+
+## Interlude: Memory API
+
+### 14.1 Types of Memory
+
+#### stack
+
+- managed implicitly by the compiler, so sometimes called **automatic** memory
+    - 호출 시 stack에 공간 생성
+    - return 시 deallocate
+
+```rs
+pub fn func() -> () {
+    let x: i32; // declares an integer on the stack
+} // deallocate the memory
+```
+
+#### heap
+
+- all allocations and deallocations are *explicitly* handled by programmer
+- 컴파일러는 개발자가 선언한 변수와 타입을 보고 해당 타입에 대한 공간을 생성해야 한다는 것을 알고, heap에 해당 타입에 대한 공간을 요청하면, ㅇ 루틴은 성공 시 그 공간에 대한 주소를 반환
+
+### 14.2 The `malloc()` Call
+
+```rs
+let x_ptr = libc::malloc(mem::size_of::<i32>());
+let d_ptr = libc::malloc(mem::size_of::<f64>());
+// [test_malloc] i32_size_t is 4, x_ptr is 0x12be06c90
+// [test_malloc] f64_size_t is 8, d_ptr is 0x12be06ca0
+```
+
+`mem::size_of::<타입>`은 *compile time*의 작업으로, 실제 크기는 컴파일 시에 알게 된다. `size_of`는 컴파일 타임에 각각 4, 8로 대체된다.
+
+함수 호출은 런타임에 발생하므로, `size_of`는 함수 호출이 아닌 연산자(operator)로 올바르게 여겨진다.
+
+### The `free()` Call
+
+```rs
+libc::free(x_ptr);
+libc::free(d_ptr);
+```
+
+할당됐던 지역의 사이즈가 직접 매개변수로 들어가지 않고, 메모리를 할당했던 라이브러리 자체적으로 트래킹하여 처리한다
+
+### 14.4 Common Errors
+
+#### Forgetting To Allocate Memory
+
+- segmentation fault 발생할 수 있다
+
+#### Not Allocating Enough Memory
+
+- `buffer overflow`로 불리기도 한다
+- 충분한 메모리를 할당하지 않으면, 다른 메모리 공간을 덮어쓰게 되면서 충돌이 발생할 수 있다.
+
+#### Forgetting to Initialize Allocated Memory
+
+- 새로 할당된 메모리에 어떤 값을 채워넣지 않는다면 `uninitialized read`를 마주치게 된다,
+- 만약 초기화하지 않는다면, 그 메모리 공간에 뭐가 있을지 누구도 알 수 없다. 왜일까?
+    - `malloc()`을 사용하면 그 공간을 예약받는 것과 다름이 없다
+    - 하지만 그 공간에는 전에 사용하던 어떤 값이 남아 있을 수 있으며, 따라서 해당 메모리 공간이 zero나 null로 시작한다는 보장을 할 수가 없다
+
+#### Forgetting To Free Memory
+
+- `memory leak`으로 인해 out of memory(OOM) 발생
+- 단기간 실행되고 exit 되는 프로그램 경우 `free`로 메모리를 해제하지 않더라도 결국 프로세스가 죽으면 OS는 할당된 페이지들을 정리하게 되어 메모리 누수가 발생하지 않게 되겠지만, 이는 개발자에게 나쁜 습관이 된다.
+
+#### Freeing Memory Before You Are Done With It
+
+- `dangling pointer`(댕글링, 허상 포인터)
+- 작업 완료 전에 `free()` -> `malloc()`으로 재할당 -> 완료되지 않은 작업에서 접근 -> 에러 발생 가능
+
+#### Freeing Memory Repeatedly
+
+- 두 번 `free`할 수 있는데, 이 결과는 정해진 게 없다. 라이브러리가 혼란에 빠질 수 있고, 모든 종류의 이상한 일이 발생할 수 있다.
+
+#### Calling `free()` Incorrectly
+
+#### 요약
+
+- 메모리로 인한 에러가 자주 발생하므로, 코드의 문제를 찾는 데 도움을 주는 여러 툴들이 개발됐다. 가령 `purify`, `valgrind` 같은 툴로 이상 여부를 체크할 수 있다.
+
+### 14.5 Underlying OS Support
+
+- `malloc()`과 `free()`은 시스템 콜이 아니라, 라이브러리 콜
+- malloc 라이브러리는 가상 주소 공간의 공간을 관리하지만, 라이브러리 그 자체는 더 많은 메모리를 요청하거나 메모리를 반환하는 어떤 시스템 콜들 위에 빌드 되어 있다.
+    - `brk`: 프로그램의 `break`, heap의 종료 지점을 변경시키는 데 사용된다
+    - `sbrk`
+    - `mmap`: 프로그램에  `swap space`와 연관된 anonymous memory region 생성할 수 있고, heap처럼 다룰 수 있다
+
+### 14.6 Other Calls
+
+- `calloc`: 메모리를 할당하고 반환 전에 제로로 만든다
+- `realloc`: 메모리 공간이 더 필요한 경우, 이전 region을 더 큰 메모리 공간으로 복사하고, 새로운 공간에 대한 포인터를 반환
+
+## Mechanism: Address Translation
+
+- `limited direct execution` (or `LDE`)
+    - for the most part, let the program run directly on the hardware;
+    - however, at certain key points in time (such as when a process issues a system call, or a timer interrupt occurs), arrange so that the OS gets involved and makes sure the “right” thing happens.

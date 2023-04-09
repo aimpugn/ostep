@@ -7,12 +7,12 @@ pub mod chapters;
 pub mod util;
 
 // use public modules from `src/chapters/introduction/mod.rs`
-use chapters::{introduction::*, process};
+use chapters::{introduction::*, virtualization};
 use util::args::{ArgsMap, Config};
 
 fn main() {
     let _args = Config.parse();
-    lottery()
+    memory()
 }
 
 fn introduction() {
@@ -27,7 +27,7 @@ fn process() {
     // process_run();
     // process::apis::test_fork_by_fork();
     // process::apis::test_fork_by_nix();
-    process::apis::test_fork_by_nix_wait_child();
+    virtualization::cpu::apis::test_fork_by_nix_wait_child();
     // process::apis::test_exec_wc();
     // process::apis::test_exec_output_redirect();
     // process::apis::test_change_variable_from_child();
@@ -35,7 +35,7 @@ fn process() {
 
 fn process_run() {
     // process
-    let s = process::process_run::Scheduler {
+    let s = virtualization::cpu::process_run::Scheduler {
         proc_info: HashMap::new(),
         process_switch_behavior: String::from(""),
         io_done_behavior: String::from(""),
@@ -47,5 +47,10 @@ fn process_run() {
 }
 
 fn lottery() {
-    process::lottery::simple_lottery_scheduling();
+    virtualization::cpu::lottery::simple_lottery_scheduling();
+}
+
+fn memory() {
+    // virtualization::memory::heap::test_alloc();
+    virtualization::memory::heap::test_malloc();
 }

@@ -3,6 +3,10 @@
 - [Macros](#macros)
     - [매크로와 함수의 차이](#매크로와-함수의-차이)
     - [`macro_rules!` 사용한 선언적 매크로](#macro_rules-사용한-선언적-매크로)
+    - [`println!()`](#println)
+        - [`{}`](#)
+        - [`{:p}`](#p)
+        - [`{:?}` 또는 `{:#?}`](#-또는-)
 
 `macro`는 Rust의 기능군(a family of features)을 가리킨다
 
@@ -73,3 +77,26 @@ vec![1, 2, 3];
     - [일반적인 코드상에서의 패턴 문법](https://doc.rust-lang.org/book/ch18-03-pattern-syntax.html)
     - [매크로의 패턴 문법](https://doc.rust-lang.org/reference/macros-by-example.html)
 - [The Little Book of Rust Macros](https://veykril.github.io/tlborm/)
+
+## `println!()`
+
+- [Formatted print](https://doc.rust-lang.org/rust-by-example/hello/print.html)
+- [Module std::fmt](https://doc.rust-lang.org/std/fmt/)
+
+### `{}`
+
+### `{:p}`
+
+- 포인터 출력
+
+```rs
+let x_layout = Layout::new::<i32>();
+let x_ptr = alloc(x_layout);
+// x_ptr type: `*mut u8`
+println!("{:p}", x_ptr);
+```
+
+### `{:?}` 또는 `{:#?}`
+
+- `?`: [Debug](https://doc.rust-lang.org/std/fmt/trait.Debug.html)
+- `#`을 붙이면 pretty print
