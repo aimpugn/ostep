@@ -19,3 +19,6 @@ version="0.2"
 
 [dependencies.rand]
 version="0.8.5"
+
+[dependencies.cargo-show-asm]
+version="0.2.17"

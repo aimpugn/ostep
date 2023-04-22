@@ -1,4 +1,5 @@
 #![allow(dead_code, unused_imports)]
+
 // here `src/main.rs` is crate root of binary
 use std::{collections::HashMap, env};
 
@@ -12,7 +13,7 @@ use util::args::{ArgsMap, Config};
 
 fn main() {
     let _args = Config.parse();
-    memory()
+    memory();
 }
 
 fn introduction() {
@@ -52,5 +53,6 @@ fn lottery() {
 
 fn memory() {
     // virtualization::memory::heap::test_alloc();
-    virtualization::memory::heap::test_malloc();
+    // virtualization::memory::heap::test_malloc();
+    virtualization::memory::address_translation::func_to_increase();
 }

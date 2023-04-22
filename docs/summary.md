@@ -87,6 +87,17 @@
         - [14.5 Underlying OS Support](#145-underlying-os-support)
         - [14.6 Other Calls](#146-other-calls)
     - [Mechanism: Address Translation](#mechanism-address-translation)
+        - [15.1 Assumptions](#151-assumptions)
+        - [15.2 An Example](#152-an-example)
+        - [15.3 Dynamic (Hardware-based) Relocation](#153-dynamic-hardware-based-relocation)
+            - [Example Translations](#example-translations)
+        - [15.4 Hardware Support: A Summary](#154-hardware-support-a-summary)
+            - [하드웨어 요구 사항](#하드웨어-요구-사항)
+        - [15.5 Operating System Issues](#155-operating-system-issues)
+            - [OS 책임 사항](#os-책임-사항)
+            - [주소 공간 relocation by OS](#주소-공간-relocation-by-os)
+            - [Limited Direct Execution (Dynamic Relocation) @ Boot and @ Runtime](#limited-direct-execution-dynamic-relocation--boot-and--runtime)
+            - [고정 크기의 메모리 할당의 단점](#고정-크기의-메모리-할당의-단점)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -1395,7 +1406,7 @@ fn pop_back_node(&mut self) -> Option<Box<Node<T>>> {
 ### 13.4 Goals
 
 - `transparency`(it means "one that is hard to notice")
-    - in a way that is invisible to the running program
+    - in a way that is **invisible** to the running program
     - the program behaves as if it has its own private physical memory
     - multiplex memory among many different jobs
 - `efficiency`
@@ -1505,3 +1516,276 @@ libc::free(d_ptr);
 - `limited direct execution` (or `LDE`)
     - for the most part, let the program run directly on the hardware;
     - however, at certain key points in time (such as when a process issues a system call, or a timer interrupt occurs), arrange so that the OS gets involved and makes sure the “right” thing happens.
+    - 실행중인 프로그램을 방해하지 않으면서 효율적인 가상화를 제공하고, 중요한 순간에 개입(**interposing**)함으로써 하드웨어에 대한 제어를 유지
+
+> **INTERPOSITION**  
+> In virtualizing memory, the hardware will *interpose* on each memory access, and *translate* each virtual address issued by the process to a physical address where the desired information is actually stored.  
+> One of the usual benefits of such an approach is **transparency**; the interposition often is done *without changing the interface of the client*, thus requiring no changes to said client.
+
+- 메모리 가상화도 이와 같은 전략을 따른다
+    - Efficiency
+        - 하드웨어 지원을 활용.
+        - 처음에는 몇 개의 register였지만, 이제는 TLB, page-table 지원 등 복잡한 지원
+    - Control
+        - 어떤 애플리케이션도 그 자신의 메모리 메모리 외에는 접근할 수 없음
+    - flexibility
+        - 각 프로그램들이 원하는 방식대로 프로그램의 주소 공간을 사용할 수 있도록 하는 것
+- LDE와 비슷한 접근 방식을 `hardware-based address translation` 또는 짧게 `address translation`이라고 한다
+    - the **hardware**
+        - *transforms each memory access* (e.g., an instruction fetch, load, or store), changing the virtual address provided by the instruction *to a physical address* where the desired information is actually located.
+        - redirect application memory references to their actual locations in memory
+
+### 15.1 Assumptions
+
+> 1. user’s address space must be placed contiguously in physical memory  
+> 2. the size of the address space is not too big, less than the size of physical memory  
+> 3. each address space is exactly the same size.
+
+### 15.2 An Example
+
+```c
+void func() {
+    int x = 3000; // thanks, Perry.
+    x = x + 3; // line of code we are interested in
+    //...
+}
+```
+
+```asm
+// cargo asm --bin ostep ostep::main
+    .globl    __ZN5ostep8chapters14virtualization6memory19address_translation16func_to_increase17h8171c6ddb07628f4E
+    .p2align    2
+__ZN5ostep8chapters14virtualization6memory19address_translation16func_to_increase17h8171c6ddb07628f4E:
+Lfunc_begin92:
+    .file    103 "/Users/rody/VscodeProjects/ostep" "src/chapters/virtualization/memory/address_translation.rs"
+    .loc    103 2 0
+    .cfi_startproc
+    .loc    103 7 2 prologue_end
+    mov    w0, #3003
+    ret
+```
+
+```asm
+// https://play.rust-lang.org/?version=stable&mode=debug&edition=2021
+playground::main:
+    subq    $4, %rsp
+    movl    $3000, (%rsp)
+    movl    $3003, (%rsp)
+    addq    $4, %rsp
+    retq
+```
+
+```asm
+// from ostep book in x86 assembly
+128: movl 0x0(%ebx), %eax ;load 0+ebx into eax
+132: addl $0x03, %eax ;add 3 to eax register
+135: movl %eax, 0x0(%ebx) ;store eax back to mem
+```
+
+- `ebx`: register
+- `eax`: general-purpose register
+- `movl`: "longword" move
+
+```text
+|   0kb   |----------------------|
+|      128|movl 0x0(%ebx),%eax   |
+|      132|addl 0x03, %eax       |
+|      135|movl %eax,0x0(%ebx)   |
+|   1kb   |                      |
+|         |     Program Code     |
+|   2kb   |----------------------|
+|         |                      |
+|   3kb   |         Heap         |
+|         |                      |
+|   4kb   |----------------------|
+|         |                      |
+|         |        (free)        |
+|         |                      |
+|   14kb  |----------------------|
+|         |                      |
+|         |                      |
+|   15kb  |3000                  |
+|         |         stack        |
+|   16kb  |----------------------|
+```
+
+- to virtualize memory, the OS wants to place the process somewhere else in physical memory, not necessarily at address 0.
+
+> how can we relocate this process in memory in a way that is **transparent** to the process?  
+> How can we provide the *illusion of a virtual address space starting at 0*, when in reality the address space is located at some other physical address?
+
+- again, `transparent` is...
+    - process of relocating memory or providing a virtual address space is **invisible** or **not noticeable** to the running process
+    - so, process is not aware of the actual physical memory addresses
+    - it allows programs to operate with the illusion of a private and continuous address space without having to be concerned about the actual memory allocation and management details
+
+### 15.3 Dynamic (Hardware-based) Relocation
+
+- **`base` and `bounds`(also `limit`)** registers(referred to as `dynamic relocation`)
+    - allow us to place the address space anywhere we’d like in physical memory
+    - ensuring that the process can only access its own address space
+    - about `bounds` registers:
+        - it holds the *size* of the address space -> check the virtual address before adding the `base`
+        - it holds the *physical address of the end of the address space* -> check the
+- when a program starts running, the OS decides:
+    1. where in physical memory it should be loaded
+    2. and sets the `base` register to that value.
+
+> physical address = virtual address + base
+
+가령 만약 앞서 `func()` 코드 실행 위해서 OS가 32KB 물리주소에 프로세스 로드하기로 결정한 경우, `address translation` 과정은 다음과 같다
+
+```asm
+// from ostep book in x86 assembly
+128: movl 0x0(%ebx), %eax ;load the value at address `0x0 + %ebx` into `%eax` register
+132: addl $0x03, %eax ;add 3 to eax register
+135: movl %eax, 0x0(%ebx) ;store eax back to mem
+```
+
+1. The instruction `128: movl 0x0(%ebx), %eax` is located at a virtual address 128.
+2. When *the hardware* needs to fetch the instruction of *'program counter(PC) is set to 128'*,
+    1. To get a physical address, *the hardware* adds the value *128* to the `base` register value of *32 KB (32,768)*, so the result iss *32,896*
+    2. then fetches the instruction from that physical address
+3. the processor begins executing the instruction
+4. the process issues the load from virtual address 15KB
+    1. *the processor* takes and again adds to the base register (32 KB)
+    2. getting the final physical address of 47 KB
+    3. and thus the desired contents
+
+여기서 *the hardware*는 프로세서, 특히 프로세서 내의 메모리 관리 유닛([MMU](https://en.wikipedia.org/wiki/Memory_management_unit))를 의미
+
+the processor will first check that the memory reference is within `bounds` to make sure it is legal. If a process generates a virtual address that is greater than the `bounds`, or one that is negative, the CPU will raise an exception, and the process will likely be terminated
+
+#### Example Translations
+
+> When a process with an address space of size 4 KB has been loaded at physical address 16 KB
+
+| Virtual Address | Physical Address        |
+| --------------- | ----------------------- |
+| 0               | → 16 KB                 |
+| 1 KB            | → 17 KB                 |
+| 3000            | → 19384                 |
+| 4400            | → Fault (out of bounds) |
+
+### 15.4 Hardware Support: A Summary
+
+#### 하드웨어 요구 사항
+
+1. two different CPU modes
+    - `privileged mode`(`kernel mode`)
+    - `user mode`
+2. the `base` and `bounds` registers, part of the memory management unit (MMU) of the CPU
+    - translate each address by adding the `base` value to the virtual address
+    - check whether the address is valid
+3. special instructions to modify the `base` and `bounds` registers,
+4. the CPU must be able to generate **exceptions** when a user program tries to access memory illegally
+5. **exception handler** by which OS must be able to tell hardware what code to run if exception occurs
+
+### 15.5 Operating System Issues
+
+Again, our assumptions are:
+
+> 1. user’s address space must be placed contiguously in physical memory  
+> 2. the size of the address space is not too big, less than the size of physical memory  
+> 3. each address space is exactly the same size.
+
+#### OS 책임 사항
+
+1. Memory management
+    - `free list` 탐색하여 새로운 프로세스 위한 메모리 할당하고 사용중이라고 표시
+    - 종료된 프로세스로부터 메모리 회수하여 `free list`에 넣고 필요에 따라 관련 자료 구조 정리
+    - `free list` 통한 메모리 관리
+2. `base`, `bound` management
+    - `base`와 `bound` 한쌍을 저장하고 있다가 컨텍스트 스위치 시 CPU에 설정
+    - 특히 실행중인 프로그램 중지할 경우, `process structure` 또는 `process control block`(`PCB`) 같은 프로세스별 구조에 저장해야 한다
+3. exception handling
+    - 익셉션 발생 시 실행할 코드(boot time에 설치)
+
+#### 주소 공간 relocation by OS
+
+1. OS deschedules the process
+2. OS copies the address space from the current location to the new location
+3. OS updates the saved base register(in the `process structure`) to point to the new location
+
+#### Limited Direct Execution (Dynamic Relocation) @ Boot and @ Runtime
+
+1. At boot
+    1. [OS]
+        1. [OS] initialize trap table
+    2. [H/W]
+        1. [H/W] remember addresses of
+            1. syscall handler
+            2. timer handler
+            3. illegal mem-access handler
+            4. illegal instruction handler
+    3. [OS]
+        1. [OS] start interrupt timer
+    4. [H/W]
+        1. [H/W] start timer
+        2. [H/W] interrupt CPU after X ms
+    5. [OS]
+        1. [OS] initialize process table
+        2. [OS] initialize free list
+2. At run
+    1. [To run A Process]
+        1. [OS]
+            1. [OS] Create entry for process list
+            2. [OS] Allocate memory for theprogram's code, data, stack, heap
+            3. [OS] Load program into memory(executable into the allocated memory space)
+            4. [OS] Set up the user stack with the program's arguments, `argv`
+            5. [OS] Fill kernel stack with initial register and program counter(`PC`)
+            6. [OS] allocate entry in process table
+            7. [OS] alloc memory for process set `base`/`bound` registers
+            8. [OS] return-from-trap (into A)
+        2. [H/W]
+            1. [H/W] restore registers of A
+            2. [H/W] move to user mode
+            3. [H/W] jump to A’s (initial) PC
+        3. [Program]
+            1. [Program] Process A runs: Fetch instruction
+        4. [H/W]
+            1. [H/W] translate virtual address
+            2. [H/W] perform fetch
+        5. [Program]
+            1. [Program] Process A runs: Execute instruction
+        6. [H/W]
+            1. [H/W] if explicit load/store: ensure address is legal
+            2. [H/W] translate virtual address
+            3. [H/W] perform load/store
+        7. [Program]
+            1. [Program] Process A runs
+        8. [H/W]
+            1. [H/W] timer interrupt
+            2. [H/W] save (A)regs → (A)kernal-stack
+            3. [H/W] move to kernel mode
+            4. [H/W] jump to trap handler
+    2. [To run B Process]
+        1. [OS]
+            1. [OS] Handle the trap
+            2. [OS] timer interrupt handler decides to switch from A-process to B-process
+            3. [OS] Call `switch()` routine
+            4. [OS] save (A)regs → to (A)process-structure in memory
+            5. [OS] restore (B)regs ← from (B)process-structure in memory
+            6. [OS] switch to (B)kernal-stack by changing the stack pointer(`switch context`)
+            7. [OS] `return-from-trap` (into B)
+        2. [H/W]
+            1. [H/W] restore (B)regs ← (B)kernal-stack
+            2. [H/W] move to user mode
+            3. [H/W] jump to B’s PC
+        3. [Program]
+            1. [Program] Process B runs: Execute bad load
+        4. [H/W]
+            1. [H/W] Load is out-of-bounds;
+            2. [H/W] move to kernel mode
+            3. [H/W] jump to trap handler
+        5. [OS]
+            1. [OS] Handle the trap
+            2. [OS] decide to kill process B
+            3. [OS] deallocate B’s memory
+            4. [OS] free B’s entry in process table
+
+#### 고정 크기의 메모리 할당의 단점
+
+프로세스가 사용하는 stack과 heap이 크지 않으면, 할당된 메모리를 낭비하는 내부 단편화(**internal fragmentation**) 발생 가능하다. 이번 챕터에서 살펴본 접근 방식상 프로세스가 메모리를 요청하면 고정된 크기의 블록이 프로세스에 할당되는데, 프로세스가 실제로 사용하는 것보다 할당된 메모리가 더 크면 내부 단편화 발생.
+
+물리 메로리를 더 활용하고 **internal fragmentation**를 피하기 위해 **`segmentation`**라고 알려진 `base`와 `bound`의 약간의 일반화(a slight generalization) 시도

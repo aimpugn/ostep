@@ -46,3 +46,52 @@ error: Using `cargo install` to install the binaries for the package in current 
   Installing /Users/rody/.cargo/bin/ostep
    Installed package `ostep v0.1.0 (/Users/rody/VscodeProjects/ostep)` (executable `ostep`)
 ```
+
+## `let...else` statements are unstable
+
+### 문제
+
+```log
+   Compiling cargo-show-asm v0.2.17
+error[E0658]: `let...else` statements are unstable
+   --> /Users/rody/.cargo/registry/src/github.com-1ecc6299db9ec823/cargo-show-asm-0.2.17/src/main.rs:348:17
+    |
+348 |                 let Some(name) = maybe_origin.file_name() else { continue };
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: see issue #87335 <https://github.com/rust-lang/rust/issues/87335> for more information
+
+error[E0658]: `let...else` statements are unstable
+   --> /Users/rody/.cargo/registry/src/github.com-1ecc6299db9ec823/cargo-show-asm-0.2.17/src/main.rs:349:17
+    |
+349 |                 let Some(name) = name.to_str() else { continue };
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: see issue #87335 <https://github.com/rust-lang/rust/issues/87335> for more information
+
+For more information about this error, try `rustc --explain E0658`.
+error: could not compile `cargo-show-asm` due to 2 previous errors
+error: failed to compile `cargo-show-asm v0.2.17`, intermediate artifacts can be found at `/var/folders/9x/8djp1ylj221bk02dp8zqsps00000gn/T/cargo-installsXl3w4`
+```
+
+### 원인
+
+설치 당시 러스트 버전이 `1.64.0`인데, 이 버전으로는  let...else가 unstable
+
+```shell
+❯ rustc --version
+rustc 1.64.0 (a55dd71d5 2022-09-19)
+```
+
+### 해결
+
+버전 의존적인 내용이 없어서, 버전 업
+
+```shell
+rustup update
+```
+
+```shell
+❯ rustc --version
+rustc 1.68.2 (9eb3afe9e 2023-03-27)
+```
