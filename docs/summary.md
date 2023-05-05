@@ -98,6 +98,14 @@
             - [주소 공간 relocation by OS](#주소-공간-relocation-by-os)
             - [Limited Direct Execution (Dynamic Relocation) @ Boot and @ Runtime](#limited-direct-execution-dynamic-relocation--boot-and--runtime)
             - [고정 크기의 메모리 할당의 단점](#고정-크기의-메모리-할당의-단점)
+    - [Segmentation](#segmentation)
+        - [16.1 Segmentation: Generalized `Base`/`Bounds`](#161-segmentation-generalized-basebounds)
+            - [example translation](#example-translation)
+        - [16.2 Which Segment Are We Referring To?](#162-which-segment-are-we-referring-to)
+            - [explicit approach](#explicit-approach)
+            - [implicit approach](#implicit-approach)
+        - [16.3 What About The Stack?](#163-what-about-the-stack)
+    - [Concurrency](#concurrency)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -1661,7 +1669,7 @@ the processor will first check that the memory reference is within `bounds` to m
 > When a process with an address space of size 4 KB has been loaded at physical address 16 KB
 
 | Virtual Address | Physical Address        |
-| --------------- | ----------------------- |
+|-----------------|-------------------------|
 | 0               | → 16 KB                 |
 | 1 KB            | → 17 KB                 |
 | 3000            | → 19384                 |
@@ -1789,3 +1797,138 @@ Again, our assumptions are:
 프로세스가 사용하는 stack과 heap이 크지 않으면, 할당된 메모리를 낭비하는 내부 단편화(**internal fragmentation**) 발생 가능하다. 이번 챕터에서 살펴본 접근 방식상 프로세스가 메모리를 요청하면 고정된 크기의 블록이 프로세스에 할당되는데, 프로세스가 실제로 사용하는 것보다 할당된 메모리가 더 크면 내부 단편화 발생.
 
 물리 메로리를 더 활용하고 **internal fragmentation**를 피하기 위해 **`segmentation`**라고 알려진 `base`와 `bound`의 약간의 일반화(a slight generalization) 시도
+
+## Segmentation
+
+### 16.1 Segmentation: Generalized `Base`/`Bounds`
+
+> `segmentation`: just a contiguous portion of the address space of a particular length
+
+three logically-different segments
+- code
+- stack
+- heap
+
+각 세그먼트를 물리 메모리의 서로 다른 부분에 할당하여 사용하지 않는 가상 주소 공간이 물리 메모리를 채우는 것을 피할 수 있다.
+
+#### example translation
+
+```text
+|   0kb   |----------------------|
+|         |                      | <<-- 100
+|   1kb   |                      |
+|         |     Program Code     |
+|   2kb   |----------------------|
+|         |                      |
+|   3kb   |                      |
+|         |                      |
+|   4kb   |----------------------|
+|         |                      | <<-- 4,200
+|   5kb   |                      |
+|         |         Heap         |
+|   6kb   |                      |
+|         |                      |
+|   7kb   |----------------------|
+|         |                      |
+|         |        (free)        |
+|         |                      |
+|   14kb  |----------------------|
+|         |                      |
+|   15kb  |                      |
+|         |         stack        |
+|   16kb  |----------------------|
+```
+
+| Segment | Base | Size |
+|---------|------|------|
+| Code    | 32K  | 2K   |
+| Heap    | 34K  | 3K   |
+| Stack   | 28K  | 2K   |
+
+- reference to virtual address 100?
+    1. `base` + 100 = 32,768 + 100 = 32,868
+    2. 100 < 2KB size, so within `bounds`
+    3. issue the reference to physical memory address 32868
+
+- an address in the *heap*, virtual address 4200?
+    1. ~~`base` + 4,200 = 34,816 + 4200 = 39,016~~
+    2. 4,200 - 4,096(where the heap starts) = 104 = *offset*
+    3. `base` + 104(*offset*) = 34,816 + 104 = 34,920
+
+- What if we tried to refer to an illegal address? **segmentation violation** or **segmentation fault**
+    1. the hardware detects that the address is out of `bounds`
+    2. traps into the OS
+    3. termination of the offending process.
+
+### 16.2 Which Segment Are We Referring To?
+
+The hardware uses `segment registers` during translation.
+
+#### explicit approach
+
+chop up the address space into segments based on the top few bits of the virtual address
+
+If we use the top two bits of our 14-bit virtual address to select the segment:
+- `00`: code
+- `01`: heap
+- `11`: stack
+
+```text
+ 13  12 | 11  10   9   8   7   6   5   4   3   2   1   0
+|   |   |   |   |   |   |   |   |   |   |   |   |   |   |
+ ^^^^^^^|^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Segment                     Offset
+```
+
+If heap virtual address 4200:
+
+```text
+ 13  12 |11  10   9   8   7   6   5   4   3   2   1   0
+| 0 | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 1 | 0 | 1 | 0 | 0 | 0 |
+ ^^^^^^^|^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Segment                     Offset
+```
+
+0000 0110 1000 = 0x068 = 104
+
+```c
+SEG_MASK = 0x3000 // 11 0000 0000 0000
+SEG_SHIFT = 12
+OFFSET_MASK = 0xFFF // 1111 1111 1111
+// get top 2 bits of 14-bit VA
+Segment = (VirtualAddress & SEG_MASK) >> SEG_SHIFT
+// now get offset
+Offset = VirtualAddress & OFFSET_MASK
+if (Offset >= Bounds[Segment])
+    RaiseException(PROTECTION_FAULT)
+else
+    PhysAddr = Base[Segment] + Offset
+    Register = AccessMemory(PhysAddr)
+```
+
+- `SEG_MASK`: `&` 연산 시 가장 앞의 두 비트에서 유효한 비트만 남기도록 하는 mask
+- `SEG_SHIFT`: 세그먼트 확인 시 나머지 12비트는 필요 없으니 제거하기 위한 shift 값
+- `OFFSET_MASK`: 12비트중 유효한 비트만 남기도록 하는 mask
+
+#### implicit approach
+
+the hardware determines the segment by noticing how the address was formed.
+
+1. If the address was generated from the *program counter*(i.e., it was an instruction fetch), then the address is within the **code segment**;
+2. If the address is based off of the *stack* or *base pointer*, it must be in the **stack segment**
+3. any other address must be in the heap.
+
+### 16.3 What About The Stack?
+
+it grows *backwards* (i.e., towards lower addresses). So the hardware also needs to know which way the segment grows.
+
+| Segment    | Base | Size | Grows Positive ? |
+|------------|------|------|:----------------:|
+| Code (00)  | 32K  | 2K   |        1         |
+| Heap (01)  | 34K  | 3K   |        1         |
+| Stack (11) | 28K  | 2K   |        0         |
+
+- to access virtual address 15KB
+    1. `base` - (16KB - 15KB) = 27KB에 맵핑
+
+## Concurrency
