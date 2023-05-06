@@ -13,7 +13,7 @@ use util::args::{ArgsMap, Config};
 
 fn main() {
     let _args = Config.parse();
-    memory();
+    threads();
 }
 
 fn introduction() {
@@ -55,4 +55,8 @@ fn memory() {
     // virtualization::memory::heap::test_alloc();
     // virtualization::memory::heap::test_malloc();
     virtualization::memory::address_translation::func_to_increase();
+}
+
+fn threads() {
+    chapters::concurrency::threads::test_threads();
 }

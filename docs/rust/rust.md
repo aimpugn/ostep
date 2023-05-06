@@ -15,6 +15,9 @@
     - [Attributes](#attributes)
         - [Built-in attributes index](#built-in-attributes-index)
     - [`?` operator](#-operator)
+    - [reference, dereference, and mutability](#reference-dereference-and-mutability)
+        - [reference(`&`)](#reference)
+        - [dereference(`*`)](#dereference)
 
 ## vscode settings
 
@@ -192,3 +195,28 @@ inner와 outer 속성이 있으며, 차이점은 작동 방식이 아닌, 적�
 // the `?` operator can only be applied to values
 // that implement `Try` the trait `Try` is not implemented for `&mut
 ```
+
+## reference, dereference, and mutability
+
+### reference(`&`)
+
+1. `&T`(immutable): read from the referenced value
+2. `&mut T`(mutable): read and modify the referenced value.
+
+```rs
+let x = 42;
+let y = &x; // y is an immutable reference to x
+let z = &mut x; // error! cannot borrow `x` as mutable, as it is not declared as mutable
+```
+
+reference rules
+1. one mutable reference XOR multiple immutable references
+2. Mutable and immutable references cannot coexist at the same time.
+
+```rs
+let mut x = 42;
+let y = &x; // y is an immutable reference to x
+let z = &mut x; // z is a mutable reference to x
+```
+
+### dereference(`*`)

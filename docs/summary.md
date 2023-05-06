@@ -105,7 +105,12 @@
             - [explicit approach](#explicit-approach)
             - [implicit approach](#implicit-approach)
         - [16.3 What About The Stack?](#163-what-about-the-stack)
-    - [Concurrency](#concurrency)
+        - [Concurrency and threads](#concurrency-and-threads)
+        - [26.1 Why Use Threads?](#261-why-use-threads)
+            - [`parallelism`](#parallelism)
+            - [Avoid blocking program progress due to slow I/O](#avoid-blocking-program-progress-due-to-slow-io)
+        - [26.2 An Example: Thread Creation](#262-an-example-thread-creation)
+        - [26.3 Why It Gets Worse: Shared Data](#263-why-it-gets-worse-shared-data)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -128,7 +133,10 @@ due to virtualization:
 
 #### virtualizing the CPU
 
-a single CPU as the seemingly infinite number of CPU.
+a single CPU as the seemingly infinite number of CPU. It provides illusion of private CPU registers (mechanisms and policy)
+
+- Processes and Threads
+- [Scheduling](#scheduling)
 
 #### virtualizing the Memory
 
@@ -609,7 +617,7 @@ swtch:
 
 ## Scheduling
 
-- for turnaround time
+- for [turnaround time](https://en.wikipedia.org/wiki/Turnaround_time): 프로세스를 완료하거나 요청 사항을 충족하는 데 소요되는 시간
     - SJF
     - STCF
 - for response time
@@ -1406,9 +1414,9 @@ fn pop_back_node(&mut self) -> Option<Box<Node<T>>> {
 16KB|--------------------------------|
 ```
 
-- this placement of stack and heap is just a convention;
+- this placement of `stack` and `heap` is just a *convention*;
     - you could arrange the address space in a different way if you’d like
-    - when multiple threads co-exist in an address space, no nice way to divide the address space like this works anymore
+    - when multiple `threads` co-exist in an address space, no nice way to divide the address space like this works anymore
 - `virtualizing memory`(VM): the OS, in tandem with some hardware support, will have to make sure the load doesn’t actually go to physical address 0
 
 ### 13.4 Goals
@@ -1931,4 +1939,59 @@ it grows *backwards* (i.e., towards lower addresses). So the hardware also needs
 - to access virtual address 15KB
     1. `base` - (16KB - 15KB) = 27KB에 맵핑
 
-## Concurrency
+### Concurrency and threads
+
+![conccurency and parallel](resources/concurrency-and-parallel.jpeg)
+
+from [Identify the Advantages of Concurrency and Parallelism](https://openclassrooms.com/en/courses/5684021-scale-up-your-code-with-java-concurrency/5684028-identify-the-advantages-of-concurrency-and-parallelism)
+
+> again, `Program Counter`(`PC`)?  
+>
+> Where `instructions` are being fetched from and executed.  
+> It is a `register` in a computer `processor` that contains the address (location) of the instruction being executed at the current time
+
+- single thread
+    - single point of execution within a program
+    - a single Program Counter
+- multi thread
+    - multiple points of execution
+    - multiple Program Counters
+
+> `Thread`  
+>
+> abstraction for a single running process
+
+- **같은 주소 공간을 공유**하고 **같은 데이터에 접근**할 수 있는 별도의 프로세스와 같다
+- 프로그램이 어디서 instruction을 가져오는지 추적하는 PC를 갖는다
+- 각 쓰레드는 연산에 사용되는 자신만의 레지스터 집합을 갖는다. 따라서 하나의 프로세서 위에서 여러 쓰레드가 실행중인 경우 다른 스레드로 스위칭할 때 **컨텍스트 스위칭** 발생해야 한다.
+    - 프로세스의 `process control block`(`PCB`)처럼, 컨텍스트 스위칭 시 레지스터 상태(state)를 저장하기 위해 하나 이상의 `thread control block`(`TCB`) 필요
+    - 단, 컨텍스트 스위칭 시 **주소 공간은 그대로 유지**되므로, 사용중인 페이지 테이블을 전환할 필요가 없다
+
+![address spaces of single and multi thread](resources/address-space-of-single-and-multi-thread.png)
+
+스택에 할당된 변수, 매개변수, 리턴 값, 그 외 스택에 넣은 기타 항목들은 `thread-local` storage라고 불리는 관련 스레드의 stack에 위치하게 된다.
+
+### 26.1 Why Use Threads?
+
+#### `parallelism`
+
+if you are executing the program on a system with multiple processors, you have the potential of speeding up this process considerably by using the processors to each perform a portion of the work
+
+단일 스레드 프로그램을 **여러 CPU에서 작업을 수행**하는 프로그램으로 변환시키는 작업을 `parallelization`이라고 한다.
+
+#### Avoid blocking program progress due to slow I/O
+
+- different types of I/O
+    - Waiting to send or receive a message between different processes or with external systems
+    - Waiting for an explicit disk I/O to complete, like a read or write operation
+    - Waiting implicitly for a *page fault*(fetch the required page from the secondary storage like a hard disk, and load it into the physical memory) to finish
+
+while one thread in your program waits(i.e., is blocked waiting for I/O), the CPU scheduler can switch to other threads, which are ready to run and do something useful.
+
+### 26.2 An Example: Thread Creation
+
+[thread.rs::test_threads()](../src/chapters/concurrency/threads.rs) 참고
+
+If there are multiple threads created and ready to be run, what runs next is determined by the OS **scheduler**, and although the scheduler likely implements some sensible algorithm, it is hard to know what will run at any given moment in time.
+
+### 26.3 Why It Gets Worse: Shared Data
