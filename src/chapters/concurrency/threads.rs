@@ -38,3 +38,32 @@ fn mythreads(arg: &str, stdout: Arc<Mutex<std::io::Stdout>>) {
     let mut guard = stdout.lock().unwrap();
     writeln!(&mut *guard, "{}", arg).unwrap();
 }
+
+static mut COUNTER: i32 = 0;
+pub fn test_invalid_access_shared_data() {
+    unsafe {
+        println!("[Main] begin, COUNTER is {}", COUNTER);
+    }
+
+    let t1 = thread::spawn(move || test_invalid_access_shared_data_thread("T1"));
+    let t2 = thread::spawn(move || test_invalid_access_shared_data_thread("T2"));
+
+    t1.join().unwrap();
+    t2.join().unwrap();
+
+    unsafe {
+        println!("[Main] Done, COUNTER is {}", COUNTER);
+    }
+}
+
+fn test_invalid_access_shared_data_thread(arg: &str) {
+    println!("{} Begin", arg);
+    for _ in 1..(1e7 as i32) {
+        // use of mutable static is unsafe and requires unsafe function or block
+        // mutable statics can be mutated by multiple threads: aliasing violations or data races will cause undefined behavior
+        unsafe {
+            COUNTER += 1;
+        }
+    }
+    println!("{} Done", arg);
+}

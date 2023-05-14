@@ -108,9 +108,13 @@
         - [Concurrency and threads](#concurrency-and-threads)
         - [26.1 Why Use Threads?](#261-why-use-threads)
             - [`parallelism`](#parallelism)
-            - [Avoid blocking program progress due to slow I/O](#avoid-blocking-program-progress-due-to-slow-io)
+            - [느린 I/O로 인한 프로그램 blokcing 회피](#느린-io로-인한-프로그램-blokcing-회피)
         - [26.2 An Example: Thread Creation](#262-an-example-thread-creation)
         - [26.3 Why It Gets Worse: Shared Data](#263-why-it-gets-worse-shared-data)
+        - [26.4 The Heart Of The Problem: Uncontrolled Scheduling](#264-the-heart-of-the-problem-uncontrolled-scheduling)
+        - [26.5 The Wish For Atomicity](#265-the-wish-for-atomicity)
+        - [26.6 One More Problem: Waiting For Another](#266-one-more-problem-waiting-for-another)
+        - [26.7 Summary: Why in OS Class?](#267-summary-why-in-os-class)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -1963,7 +1967,9 @@ from [Identify the Advantages of Concurrency and Parallelism](https://openclassr
 
 - **같은 주소 공간을 공유**하고 **같은 데이터에 접근**할 수 있는 별도의 프로세스와 같다
 - 프로그램이 어디서 instruction을 가져오는지 추적하는 PC를 갖는다
-- 각 쓰레드는 연산에 사용되는 자신만의 레지스터 집합을 갖는다. 따라서 하나의 프로세서 위에서 여러 쓰레드가 실행중인 경우 다른 스레드로 스위칭할 때 **컨텍스트 스위칭** 발생해야 한다.
+- 각 쓰레드는 연산에 사용되는 **자신만의 레지스터 집합**을 갖는다.
+    - 레지스터들은 레지스터 상태를 저장하고 복구하는 컨텍스트 스위칭으로 가상화된다.
+    - 하나의 프로세서 위에서 여러 쓰레드가 실행중인 경우 다른 스레드로 스위칭할 때 **컨텍스트 스위칭** 발생해야 한다.
     - 프로세스의 `process control block`(`PCB`)처럼, 컨텍스트 스위칭 시 레지스터 상태(state)를 저장하기 위해 하나 이상의 `thread control block`(`TCB`) 필요
     - 단, 컨텍스트 스위칭 시 **주소 공간은 그대로 유지**되므로, 사용중인 페이지 테이블을 전환할 필요가 없다
 
@@ -1975,16 +1981,25 @@ from [Identify the Advantages of Concurrency and Parallelism](https://openclassr
 
 #### `parallelism`
 
-if you are executing the program on a system with multiple processors, you have the potential of speeding up this process considerably by using the processors to each perform a portion of the work
+> **각각 작업의 일부를 수행하는 여러 프로세서**를 이용하여 프로세스의 속도 향상
+
+if you are executing the program on a system with multiple processors, you have the potential of speeding up this process considerably by **using the processors to each perform a portion of the work**
 
 단일 스레드 프로그램을 **여러 CPU에서 작업을 수행**하는 프로그램으로 변환시키는 작업을 `parallelization`이라고 한다.
 
-#### Avoid blocking program progress due to slow I/O
+단일 CPU에서 작업이 이뤄지던 것을 여러 CPU에서 작업이 이뤄지도록 여러 스레드로 쪼개는 것을 병렬화라고 할 수 있다
+
+#### 느린 I/O로 인한 프로그램 blokcing 회피
+
+> 쓰레드는 단일 프로그램 내에서 **다른 활동과 I/O를 겹쳐서(overlap) 사용**할 수 있게 한다.
 
 - different types of I/O
-    - Waiting to send or receive a message between different processes or with external systems
-    - Waiting for an explicit disk I/O to complete, like a read or write operation
-    - Waiting implicitly for a *page fault*(fetch the required page from the secondary storage like a hard disk, and load it into the physical memory) to finish
+    - 다른 프로세스 또는 외부 시스템과의 메시지 송수신 대기
+    - 읽기/쓰기 같은 명시적인 디스크 I/O 완료 대기
+    - *page fault* 완료 암묵적으로(implicitly) 대기
+  
+> *`page fault`*?  
+> fetch the required page from the secondary storage like a hard disk, and load it into the physical memory
 
 while one thread in your program waits(i.e., is blocked waiting for I/O), the CPU scheduler can switch to other threads, which are ready to run and do something useful.
 
@@ -1995,3 +2010,103 @@ while one thread in your program waits(i.e., is blocked waiting for I/O), the CP
 If there are multiple threads created and ready to be run, what runs next is determined by the OS **scheduler**, and although the scheduler likely implements some sensible algorithm, it is hard to know what will run at any given moment in time.
 
 ### 26.3 Why It Gets Worse: Shared Data
+
+[test_invalid_access_shared_data](../src/chapters/concurrency/threads.rs) 참고.
+
+예상은 각 스레드가 각각 `COUNTER`에 1씩 더해서, 총 20,000,000이 되는 것이 목표인 프로그램.
+
+```shell
+❯ cargo run
+[Main] begin, COUNTER is 0
+T1 Begin
+T2 Begin
+T2 Done
+T1 Done
+[Main] Done, COUNTER is 10121001
+
+❯ cargo run
+[Main] begin, COUNTER is 0
+T1 Begin
+T2 Begin
+T2 Done
+T1 Done
+[Main] Done, COUNTER is 10518147
+```
+
+하지만, 쓰레드간에 공유되는 데이터에 바로 접근해서 수정하면 위와 같이 예상치 않은 결과가 나올 수 있다. 이는 **단일 프로세서에서 실행해도 마찬가지**다.
+
+### 26.4 The Heart Of The Problem: Uncontrolled Scheduling
+
+```assembly
+mov 0x8049a1c, %eax     // 메모리 위치 0x8049a1c에서 값을 가져와서 eax 레지스터에 넣는다
+add $0x1, %eax          // eax의 컨텐츠에 1을 더한다
+mov %eax, 0x8049a1c     // 증가된 값을 다시 원래의 메모리 위치에 저장
+```
+
+![invalid concurrency](./resources/thread-invalid_concurrency.png)
+
+위 그림에서 `mov` 명령은 5 byte, `add` 명령어는 3 byte 메모리 차지
+
+- `race condition`(`data race`): 거의 동시에 여러 실행 스레드가 `critical section`에 진입할 때 발생.
+    1. counter의 값을 50이라고 가정
+    2. Thread1:
+        1. 값을 가져와서 1을 더하여 레지스터의 값이 51이 됨
+        2. 하지만 timer interrupt 발생해서 OS는 쓰레드의 `TCB`에 현재 실행중인 쓰레드의 상태를 저장
+    3. Thread2:
+        1. Thread1의 결과가 반영이 안 되었으므로, 값을 가져와서 1을 더하여 레지스터의 값이 51이 됨
+        2. 증가된 값을 다시 원래의 메모리 위치에 저장
+        3. timer interrupt
+    4. Thread1:
+        1. 마지막 `mov` 실행하여 앞서 더했던 51을 원래 메모리 위치에 저장
+    5. 1을 더하는 작업이 두 번 있었지만, 결과는 1을 한번만 더한 것과 같에 됨
+- `indeterminate`
+    - 실행 시마다 프로그램의 결과가 상이한 경우
+    - 결과가 어떤 스레드가 실행되는지 타이밍에 의존
+- `critical section`
+    - 여러 thread가 실행하여 경쟁 상태가 되는 곳
+    - 즉, **공유**(shared) 변수(공유 자원)에 접근하는 코드
+- `mutual exclusion`
+    - 한 스레드가 `critical section`을 실행하면, 다른 스레드는 차단
+- `atomic`
+    - 일련의 행동을 원자적으로 만드는 아이디어의 배경은 **all or nothing**
+    - 하나로 묶길 원하는 액션들이 함께 발생하거나, 모두 발생하지 않거나 둘중 하나
+- `transaction`
+    - 여러 행동을 하나의 원자적 행위로 묶는 것
+
+### 26.5 The Wish For Atomicity
+
+- 하드웨어가 하나의 명령어로 원자적으로 실행하는 걸 지원해줄 수 있을까?
+    - 그렇지는 않다. 가령 concurrent B-Tree 빌드하고 업데이트할 때 "B-Tree를 원자적으로 업데이트"하는 명령어 지원을 원하진 않는다.
+    - 만약 "B-Tree를 원자적으로 업데이트"하는 명령어를 지원하려면, 하드웨어가 B-Tree 구조를 이해해야 하고, 그만큼 유연하지 않고 복잡해지며 효율도 떨어지게 된다
+- `synchronization primitives`
+
+### 26.6 One More Problem: Waiting For Another
+
+> one thread must wait for another to complete some action before it continues
+>
+> I/O -> sleep -> I/O complete -> wake up
+
+- synchronization primitives for atomicity
+- mechanisms for sleeping/waking interaction
+
+### 26.7 Summary: Why in OS Class?
+
+- the OS was the first concurrent program
+- For example, there are two processes running, both call `write()`. To do so, both
+    1. must allocate a new block
+    2. record in the inode of the file where this block lives
+    3. change the size of the file to reflect the new size
+- Because an interrupt may occur at any time, the code that updates these shared structures are `critical sections`;
+- `shared structures`(`critical sections` of OS)?
+    - bitmap for allocation
+        - 메모리 블록, 디스크 공간, 프로세스 ID 등등 다양한 종류의 자원들의 할당을 추적하고 관리하는 데 사용되는 데이터 구조
+        - 각 비트는 특정 자원의 상태를 나타낸다
+    - the file’s inode
+        - 유닉스 파일 시스템에서 사용되는 파일의 메타데이터를 저장하는 데이터 구조
+        - 파일의 소유자, 접근 권한, 파일 크기, 파일 데이터 블록의 위치 등과 같은 정보를 포함
+        - 각 파일은 고유한 inode를 가지며, 이는 파일의 식별자 역할
+        - 디렉토리는 파일 이름과 해당 파일의 inode 번호를 매핑한 테이블을 가진다
+    - page tables
+    - process lists
+    - file system structures
+    - and virtually every kernel data structure
