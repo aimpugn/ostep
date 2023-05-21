@@ -105,7 +105,7 @@
             - [explicit approach](#explicit-approach)
             - [implicit approach](#implicit-approach)
         - [16.3 What About The Stack?](#163-what-about-the-stack)
-        - [Concurrency and threads](#concurrency-and-threads)
+    - [Concurrency and threads](#concurrency-and-threads)
         - [26.1 Why Use Threads?](#261-why-use-threads)
             - [`parallelism`](#parallelism)
             - [느린 I/O로 인한 프로그램 blokcing 회피](#느린-io로-인한-프로그램-blokcing-회피)
@@ -1943,7 +1943,7 @@ it grows *backwards* (i.e., towards lower addresses). So the hardware also needs
 - to access virtual address 15KB
     1. `base` - (16KB - 15KB) = 27KB에 맵핑
 
-### Concurrency and threads
+## Concurrency and threads
 
 ![conccurency and parallel](resources/concurrency-and-parallel.jpeg)
 
