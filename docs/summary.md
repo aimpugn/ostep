@@ -115,6 +115,11 @@
         - [26.5 The Wish For Atomicity](#265-the-wish-for-atomicity)
         - [26.6 One More Problem: Waiting For Another](#266-one-more-problem-waiting-for-another)
         - [26.7 Summary: Why in OS Class?](#267-summary-why-in-os-class)
+    - [27. Interlude: Thread API](#27-interlude-thread-api)
+        - [27.1 Thread Creation](#271-thread-creation)
+        - [27.2 Thread Completion](#272-thread-completion)
+        - [27.3 Locks](#273-locks)
+        - [27.4 Condition Variables](#274-condition-variables)
 
 [OSTEP book chapters](https://pages.cs.wisc.edu/~remzi/OSTEP/#book-chapters)
 
@@ -2110,3 +2115,198 @@ mov %eax, 0x8049a1c     // 증가된 값을 다시 원래의 메모리 위치에
     - process lists
     - file system structures
     - and virtually every kernel data structure
+
+## 27. Interlude: Thread API
+
+### 27.1 Thread Creation
+
+```c
+#include <pthread.h>
+int pthread_create(pthread_t            *thread,
+                const pthread_attr_t    *attr,
+                    void                *(*start_routine)(void*),
+                    void                *arg);
+```
+
+- `*thread`:
+    - `pthread_t` 타입 구조에 대한 포인터.
+    - 스레드와 상호작용하기 위해 이 구조체를 사용.
+- `*attr`:
+    - 이 스레드가 가질 수 있는 속성들을 지정하는 데 사용
+    - 스택 사이즈, 스케쥴링 우선순위 등
+    - `pthread_attr_init()` 호출해서 초기화 가능
+    - 하지만 대부분의 경우 default 설정으로도 괜찮으며, NULL 넘긴다
+- `*(*start_routine)(void*)`
+    - 단일 인자 `void*`를 받고 `void*` 타입의 값을 리턴하는 함수`start_routine`에 대한 포인터
+    - `void *(*start_routine)(int)`: `int`를 단일 인자로 받고 `void *`를 리턴하는 함수
+    - `int (*start_routine)(void *)`: `void *` 포인터를 단일 인자로 받고 `int` 리턴하는 함수
+    - 왜 `void *`? 어떤 타입의 인자든 함수로 넘길 수 있고, 어떤 타입의 결과든 리턴할 수 있게 한다
+- `arg`: 스레드가 실행을 시작하는 함수로 전달되는 인자
+
+```c
+#include <stdio.h>
+#include <pthread.h>
+
+typedef struct {
+    int a;
+    int b;
+} myarg_t;
+
+void *mythread(void *arg) {
+    myarg_t *args = (myarg_t *) arg;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 스레드 생성되면 인자를 예상하는 타입으로 cast 가능
+    printf("%d %d\n", args->a, args->b);
+    return NULL;
+}
+
+int main(int argc, char *argv[]) {
+    pthread_t p;
+    myarg_t args = { 10, 20 };
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^ `myarg_t` 타입으로 패키징 된 두 개의 인자
+
+    int rc = pthread_create(&p, NULL, mythread, &args);
+}
+```
+
+스레드를 생성하면, 프로그램 내의 모든 현재 존재하는 스레드와 동일한 주소 공간 내에서 실행되고, 자체적인 호출 스택을 가지는, 실시간 실행 개체(live executing entity) 갖게 된다.
+
+### 27.2 Thread Completion
+
+스레드가 완료되길 기다리고 싶다면? `pthread_join()`이라는 함수를 호출해야 한다.
+
+스레드가 실행을 완료하면, **`pthread_join()` 함수 내부에서 대기하고 있던 메인 스레드가 반환**되며, 이때 스레드에서 반환된 `myret_t`에 있는 값을 접근할 수 있게 된다.
+
+```c
+typedef struct { int a; int b; } myarg_t;
+typedef struct { int x; int y; } myret_t;
+
+void *mythread(void *arg) {
+    myret_t *rvals = Malloc(sizeof(myret_t));
+    rvals->x = 1;
+    rvals->y = 2;
+    return (void *) rvals;
+}
+
+int main(int argc, char *argv[]) {
+    pthread_t p;
+    myret_t *rvals;
+    myarg_t args = { 10, 20 };
+    pthread_create(&p, NULL, mythread, &args);
+    pthread_join(p, (void **) &rvals);
+    printf("returned %d %d\n", rvals->x, rvals->y);
+    free(rvals);
+    return 0;
+}
+```
+
+rust에서 `libc crate` 통해서 `pthread_create` 지원
+
+```rs
+use libc::{
+    pthread_attr_init, 
+    pthread_attr_t, 
+    pthread_create, 
+    pthread_join, pthread_t
+};
+
+... 생략 ...
+
+let native: *mut pthread_t = mem::zeroed();
+pthread_create(native, attr, null, value);
+               ^^^^^^
+               직접 포인터 전달하여 rust의 안전성 검사 우회
+               무효한 포인터, 이후 해제된 메모리에 대한 포인터 사용하면
+               안전하지 않은 코드될 수 있음
+```
+
+### 27.3 Locks
+
+`locks`: mutual exclusion to a critical section
+
+```c
+// 초기화 방법1
+// pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+// 초기화 방법2: `pthread_mutex_init` 사용하여 동적으로 초기화
+pthread_mutex_t lock;
+int rc = pthread_mutex_init(&lock, NULL);
+assert(rc == 0); // always check success!
+
+pthread_mutex_lock(&lock); // 다른 스레드가 lock 획득하지 않았다면, 
+// lock 획득하고 critical section 진입
+x = x + 1; // or whatever your critical section is
+pthread_mutex_unlock(&lock);
+
+// when done with the lock;
+// pthread_mutex_destroy();
+```
+
+- `pthread_mutex_lock`
+- `pthread_mutex_unlock`
+- `pthread_mutex_trylock`
+    - returns failure if the lock is already held
+    - 매우 빠르게 잠금을 획득하려 시도하고 실패할 때:
+      바로 다시 잠금을 획득하려 시도 -> "spinlock" 발생 -> CPU 시간을 낭비 -> 다른 스레드가 잠금을 해제하는 것을 방해할 수 있음
+- `pthread_mutex_timedlock`
+    - returns after a timeout or acquiring the lock
+    - 지정된 시간이 초과될 때까지 잠금을 획득하려 시도. 근데 이 시간 동안 다른 스레드가 잠금을 해제할 수 있도록 기다리는 것이 종종 더 효율적일 수 있다
+
+UNIX 시스템에서 호출하는 거의 모든 라이브러리 루틴처럼 실패할 수 있으므로 에러가 조용히 지나가게 하지 말고 에러에 따라 적절하게 처리를 해줘야 한다. 특히 현실 세계의 **복잡한 프로그램들은 뭔가 잘못 되더라도 간단하게 프로그램을 종료할 수 없기 때문에 항상 실패 여부를 체크하고 실패한 경우 적절한 조치**를 하도록 해야 한다.
+
+```c
+// Keeps code clean; only use if exit() OK upon failure
+void Pthread_mutex_lock(pthread_mutex_t *mutex) {
+    int rc = pthread_mutex_lock(mutex);
+    assert(rc == 0);
+}
+```
+
+### 27.4 Condition Variables
+
+`condition variable`: useful when some kind of signaling must take place between threads. One has to have a lock associated with this condition, and when calling routines below, this lock should be held
+
+- `pthread_cond_wait`
+    - thread가 잠들도록 하고 다른 스레드가 시그널 보내는 것을 대기
+- `pthread_cond_signal`
+
+```c
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+pthread_mutex_lock(&lock); // 락이 잡혀 있는지 확인!!
+while (ready == 0)
+//^^^^^^^^^^^^^^^^
+// 거짓으로 잠든 스레드를 깨울 수 있는 pthread 구현들이 있기 때문에
+// 조건을 단순 if 체크가 아닌 while로 recheck
+    pthread_cond_wait(&cond, &lock); // 다른 스레드가 깨울 떄까지 잠들기
+    //                       ^^^^^^ 1. 다른 스레드가 lock 획득할 수 있도록 release
+    //                              2. 다른 스레드에 의해 깨어나고 `pthread_cond_wait`에서 
+    //                                 되돌아 오기(return) 전에 락을 다시 획득
+pthread_mutex_unlock(&lock);
+```
+
+```c
+pthread_mutex_lock(&lock); // 락이 잡혀 있는지 확인!!
+ready = 1;
+pthread_cond_signal(&cond);
+pthread_mutex_unlock(&lock);
+```
+
+대기 시퀀스의 시작 시 lock을 획득하고 마지막에 lock을 release하는 사이에 대기하는 스레드가 실행될 때마다, 해당 스레드가 lock을 잡고 있다는 걸 보장해야 한다.
+
+두 스레드 간에 시그널을 보내기 위해 위해 condition variable이나 lock 대신 간단한 플래그를 사용하고 싶어질 수 있지만, 절대 하면 안된다.
+1. 많은 경우 성능이 좋지 않다. 오랫 동안 spin 하면 CPU 사이클을 낭비.
+2. 오류가 발생하기 쉬움.
+
+pthread 관련 문서를 보고 싶다면, `man -k pthread`(또는 `apropos pthread`)
+
+> THREAD API GUIDELINES
+>
+> - keep it simple
+> - Minimize thread interactions
+> - Initialize locks and condition variables.
+> - Check your return codes.
+> - Be careful with how you pass arguments to, and return values from, threads. In particular, any time you are passing a reference to a variable allocated on the stack, you are probably doing something wrong.
+> - Each thread has its own stack. To share data between threads, the values must be in the **heap** or otherwise some locale that is globally accessible.
+> - Always use condition variables to signal between threads.
+> - Use the manual pages.

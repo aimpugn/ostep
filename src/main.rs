@@ -59,5 +59,6 @@ fn memory() {
 
 fn threads() {
     // chapters::concurrency::threads::test_threads();
-    chapters::concurrency::threads::test_invalid_access_shared_data();
+    // chapters::concurrency::threads::test_invalid_access_shared_data();
+    unsafe { chapters::concurrency::threads::test_ptrhead_create() };
 }
